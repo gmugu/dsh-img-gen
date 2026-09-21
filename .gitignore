@@ -1,6 +1,21 @@
 node_modules/
-lib/
 *.tgz
 .DS_Store
 *.log
 .smoke-home/
+
+# Build output IS shipped: a git install has no build step (this fork removes
+# the upstream `prepare` script), so lib/index.js + lib/client.js + the .d.ts
+# types must be committed. Keep the repo lean by dropping the companions that
+# nothing consumes at runtime or when consuming types.
+lib/*
+!lib/index.js
+!lib/client.js
+!lib/types
+lib/client.js.map
+lib/types/**/*.js
+lib/types/**/*.js.map
+
+# Generated locally by the plugin itself / by manual verification: never ship.
+dsh-image-gen/
+.probe/
