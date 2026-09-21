@@ -1,9 +1,5 @@
-// Must stay the first import: it shims CSS.supports before tldraw's
-// module-scope environment probe runs (#40); see css-supports-shim.ts.
-import './tl/css-supports-shim.js'
 import { useEffect, useState, useRef, type ChangeEvent, type FormEvent } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
-import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 export interface SettingsScopeSnapshot<T> {
   value: T | undefined
   writable: boolean
@@ -17,7 +13,6 @@ import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
-import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import {
   CLOUD_CREDENTIAL_REFS,
   CLOUD_IMAGE_PROVIDERS,
@@ -26,9 +21,7 @@ import {
   DEFAULT_MODELS,
   IMAGE_GENERATION_NAMESPACE,
   IMAGE_PROVIDERS,
-  IMAGE_ROUTE,
   MAX_COMFYUI_WORKFLOW_BYTES,
-  STUDIO_ROUTE,
   SUBSCRIPTION_LOGIN_ROUTE,
   SUBSCRIPTION_PROVIDERS,
   SUBSCRIPTION_STATUS_ROUTE,
@@ -41,43 +34,10 @@ import {
   type CloudImageProvider,
   type ComfyUIWorkflowEntry,
   type ImageProvider,
-  type StudioGenerateResponse,
   type SubscriptionProvider,
 } from '../shared.js'
 import { validateComfyUIWorkflowJson } from '../comfyui-workflow.js'
-import { saveGalleryItem } from './gallery-store.js'
-import { GalleryViewTab, copyImageBlob, type GalleryViewTabProps, type LocaleService } from './gallery-view.js'
-import { fetchAttachmentBlob } from './image-cache.js'
-import { imageRef, type ToolCallBlock } from './image-ref.js'
-import { startConversationLandings, type CanvasSessions } from './tl/conversation-landings.js'
-import { STUDIO_STYLE } from './studio-style.js'
-import { TL_CSS } from './tl/tl-css.js'
-import { TL_THEME_CSS } from './tl/tl-theme-css.js'
-import { INSPIRATION_STYLE } from './inspiration-style.js'
-import {
-  IMAGE_RESULT_NODE_KIND,
-  createImageResultDefinition,
-  type ImageResultPresentation,
-} from './image-result-node.js'
-import {
-  appendConversationImageRevision,
-  loadConversationImageRevisionChain,
-  selectConversationImageRevision,
-  type ConversationImageRevision,
-  type ConversationImageRevisionChain,
-} from './conversation-image-revisions.js'
-import { conversationRegenerateRequest } from './conversation-regenerate.js'
-import { ImageProviderPill, PROVIDER_PILL_STYLE, type ProviderPillFace } from './provider-pill.js'
-
-/** Build timestamp injected by tsdown at bundle time. */
-declare const __CANVAS_BUILD_TS__: string
-
-// Convention: the canvas bundle announces its build timestamp on load, so a
-// stale host webview cache is provable from the browser console. The typeof
-// guard keeps the module importable where the define is absent (vitest).
-if (typeof __CANVAS_BUILD_TS__ !== 'undefined') {
-  console.info(`[dsh-image-gen] canvas bundle ${__CANVAS_BUILD_TS__}`)
-}
+import type { LocaleService } from './locale.js'
 
 type Provider = ImageProvider
 interface ImageSettings {
@@ -146,35 +106,7 @@ interface SettingsFace {
   locale?: LocaleService | undefined
   credentialEvents?: CredentialEvents | undefined
 }
-interface ImageCardFace { locale?: LocaleService | undefined; promoted: boolean }
 type SettingsCardProps = PropsRuntime<'settings.plugins.tab'> & InjectFace<SettingsFace>
-type ImageCardProps = PropsRuntime<'tool.call.toolview'> & InjectFace<ImageCardFace>
-interface ImageResultNodeProps {
-  node: { data: { results: readonly ImageResultPresentation[] } }
-  locale?: LocaleService | undefined
-}
-interface ModernUiConversation {
-  events: { register(definition: ReturnType<typeof createImageResultDefinition>): () => void }
-}
-
-/** Right-sidebar tab-type registration id (DSH 0.1.5 `sidebarRightTabs`). */
-const SIDEBAR_STUDIO_TAB_ID = 'dsh-image-gen/studio'
-/** The tab kind: a page type opened by kind, recognizing no resource address. */
-const SIDEBAR_STUDIO_TAB_KIND = 'dsh-image-gen-studio'
-/**
- * Runtime face of DSH 0.1.5's `sidebarRightTabs` service (stage one of a
- * right-sidebar tab type's registration). Kept local and duck-typed: hosts
- * without the service never reach this code (deferred inject).
- */
-interface SidebarRightTabsFace {
-  register(definition: {
-    id: string
-    kind: string
-    priority?: string
-    title: (address: string) => string
-    guide?: ReadonlyArray<{ order: number; title: () => string; description?: () => string }>
-  }): () => void
-}
 
 const DICT = {
   zh: {
@@ -285,12 +217,12 @@ const DICT = {
     saveToWorkspaceHint: '每次生成后，把图片文件保存到当前会话工作区。',
     folder: '工作区文件夹',
     folderHint: '相对当前会话工作区的子目录；留空表示工作区根目录。',
-    uiSection: '界面',
-    showPill: '在对话输入栏显示生图切换胶囊',
-    showPillHint: '开启后，输入框工具行会显示一枚胶囊，随手切换默认生图 Provider，无需进入设置；默认关闭。',
     fetchModels: '拉取模型',
     fetchingModels: '拉取中…',
     fetchModelsHint: '点击「拉取模型」用当前 Key 获取可用生图模型列表；也可手动输入。',
+    modelPick: '从已拉取的模型中选择',
+    modelPickPlaceholder: '选择模型…（已拉取 {count} 个）',
+    modelPickCurrent: '（当前）',
     modelsFound: '找到 {n} 个生图模型，点击模型框选择',
     modelsNone: '未筛出生图模型，可手动输入模型名',
     saving: '保存中…',
@@ -428,12 +360,12 @@ const DICT = {
     saveToWorkspaceHint: 'Write each generated image as a file into the session workspace.',
     folder: 'Workspace folder',
     folderHint: 'Subdirectory of the session workspace; empty means the workspace root.',
-    uiSection: 'Interface',
-    showPill: 'Show the image provider pill in the chat input bar',
-    showPillHint: 'Adds a small pill to the composer tool row for switching the default image provider without opening settings; off by default.',
     fetchModels: 'Fetch models',
     fetchingModels: 'Fetching…',
     fetchModelsHint: 'Click "Fetch models" to list image-capable models with the stored key; manual input still works.',
+    modelPick: 'Pick a pulled model',
+    modelPickPlaceholder: 'Choose a model… ({count} available)',
+    modelPickCurrent: '(current)',
     modelsFound: '{n} image models found; open the model field to pick one',
     modelsNone: 'No image models found; type the model name manually',
     saving: 'Saving…',
@@ -485,6 +417,7 @@ const STYLE = `
 .dsh-ig-input:focus{border-color:var(--dsw-alias-brand-primary,#4c78ff)}
 .dsh-ig-textarea{resize:vertical;min-height:56px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.5}
 .dsh-ig-input-group{display:flex;gap:8px;align-items:center}
+.dsh-ig-select{appearance:auto;cursor:pointer}
 .dsh-ig-file-row{display:flex;align-items:center;gap:10px;min-width:0}
 .dsh-ig-file-input{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;clip-path:inset(50%)}
 .dsh-ig-file-button{appearance:none;flex:none;border:1px solid var(--dsw-alias-border-l2,#d7dbe0);border-radius:8px;padding:7px 12px;background:var(--dsw-alias-bg-layer-3,#f9fafb);color:var(--dsw-alias-label-secondary,inherit);font-size:13px;cursor:pointer;transition:background .15s,border-color .15s}
@@ -589,7 +522,6 @@ const STYLE = `
 .dsh-ig-loading{color:var(--dsw-alias-label-tertiary,#7b818b);font-size:13px}
 
 /* Native Workspace Gallery & Studio View (Renders seamlessly inside DSH Session View) */
-.dsh-ig-gallery-page{width:100%;height:100%;background:var(--dsw-alias-bg-layer-1,#ffffff);display:flex;flex-direction:column;overflow:hidden;flex:1}
 
 /* 1. Top Navigation Tab Bar */
 .dsh-ig-studio-tabs-bar{display:flex;align-items:center;gap:6px;padding:6px 24px;border-bottom:1px solid var(--dsw-alias-border-l2,#e5e7eb);background:var(--dsw-alias-bg-layer-1,#ffffff);flex-shrink:0}
@@ -617,7 +549,6 @@ const STYLE = `
 .dsh-ig-studio-search-input::placeholder{color:var(--dsw-alias-label-tertiary,#94a3b8)}
 
 /* 3. Grid & Responsive Cards */
-.dsh-ig-gallery-page-body{flex:1;overflow-y:auto;padding:20px 24px}
 .dsh-ig-gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:18px}
 .dsh-ig-gallery-card{background:var(--dsw-alias-bg-layer-2,#ffffff);border:1px solid var(--dsw-alias-border-l2,#e2e8f0);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;cursor:pointer;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
 .dsh-ig-gallery-card:hover{transform:translateY(-2px);box-shadow:0 10px 20px -5px rgba(0,0,0,0.06),0 4px 6px -2px rgba(0,0,0,0.03);border-color:var(--dsw-alias-border-l1,#cbd5e1)}
@@ -683,7 +614,6 @@ const STYLE = `
 .dsh-ig-lightbox-btn:hover{background:rgba(255,255,255,0.22)}
 .dsh-ig-lightbox-btn-danger{border-color:rgba(239,68,68,0.4);color:#fca5a5}
 .dsh-ig-lightbox-btn-danger:hover{background:rgba(239,68,68,0.35)!important;color:#fff!important;border-color:rgba(239,68,68,0.7)!important}
-.dsh-ig-gallery-page-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:#fff;padding:6px 14px;border-radius:8px;font-size:13px;z-index:99999;animation:dsh-ig-fade .15s}
 
 /* Card selection and checkbox */
 .dsh-ig-gallery-card.is-selected{box-shadow:0 0 0 2px var(--dsw-alias-brand-primary,#2563eb);border-color:transparent}
@@ -744,15 +674,6 @@ const STYLE = `
 .dsh-ig-lightbox-spinner-sm{width:12px;height:12px;border:2px solid rgba(147,197,253,0.3);border-top-color:#93c5fd;border-radius:50%;animation:dsh-ig-spin .8s linear infinite;flex-shrink:0}
 .dsh-ig-lightbox-abort-btn{appearance:none;background:transparent;border:0;color:#fca5a5;font-size:11.5px;cursor:pointer;padding:0 4px;margin-left:4px;text-decoration:underline;text-underline-offset:2px}
 .dsh-ig-lightbox-abort-btn:hover{color:#ef4444}
-
-/* Hide floating chat composer and width handles when the conversation-view
-   gallery page is active. The right-sidebar variant (dsh-ig-page-in-sidebar)
-   is excluded: the native conversation runs beside it and needs its composer
-   and the column handles untouched. */
-[data-conversation-scroll]:has(.dsh-ig-gallery-page:not(.dsh-ig-page-in-sidebar)) [data-composer-seat]{display:none!important}
-:has(> [data-conversation-scroll]:has(.dsh-ig-gallery-page:not(.dsh-ig-page-in-sidebar))) > [class*="widthHandle"],
-:has(.dsh-ig-gallery-page:not(.dsh-ig-page-in-sidebar)) [class*="widthHandle"],
-.root:has(.dsh-ig-gallery-page:not(.dsh-ig-page-in-sidebar)) [class*="widthHandle"]{display:none!important}
 `
 
 
@@ -763,63 +684,17 @@ export const inject = ['slots', 'connection', 'remote', 'settingsScope', 'locale
 /** Mount the settings card, generated-image card, and native conversation gallery view. */
 export function apply(ctx: Context): void {
   const scope = ctx.settingsScope.bind<ImageSettings>({ namespace: IMAGE_GENERATION_NAMESPACE as never })
-  // Host-owned chat transcript preference ("ui-chat" transcriptView). Unknown,
-  // unavailable, or not-yet-loaded reads fall back to Compact-safe anchoring.
-  const chatScope = ctx.settingsScope.bind<{ transcriptView?: string }>({ namespace: 'ui-chat' as never })
-  const isCompactTranscript = (): boolean => chatScope.getSnapshot().value?.transcriptView !== 'normal'
   const locale = ctx.get('locale') as LocaleService | undefined
-  const promotion = { enabled: false }
-
-  ;(ctx.inject as unknown as (services: string[], callback: (owner: Context) => void) => void)(
-    ['sessions'],
-    owner => {
-      const sessions = owner.get('sessions') as CanvasSessions | undefined
-      if (typeof sessions?.binding !== 'function' || typeof sessions.list?.subscribe !== 'function') return
-      owner.effect(() => startConversationLandings(sessions), 'dsh-image-gen: live canvas images')
-    },
-  )
 
   ctx.effect(() => {
     const style = document.createElement('style')
     style.dataset.plugin = 'dsh-image-gen'
-    style.textContent = `${STYLE}\n${STUDIO_STYLE}\n${INSPIRATION_STYLE}\n${PROVIDER_PILL_STYLE}\n${TL_CSS}\n${TL_THEME_CSS}`
+    style.textContent = STYLE
     document.head.appendChild(style)
     return () => {
       style.remove()
     }
   }, 'dsh-image-gen: styles')
-
-  // One-time cleanup: the workflow canvas tab was removed; drop its orphaned
-  // IndexedDB database. Best-effort only: a missing database succeeds
-  // immediately, and failures (locked/blocked) are ignored.
-  if (typeof indexedDB !== 'undefined') {
-    const request = indexedDB.deleteDatabase('dsh_image_gen_canvas')
-    request.onerror = () => {}
-    request.onblocked = () => {}
-  }
-
-  const register = ctx.slots.register.bind(ctx.slots) as unknown as (options: object, component: unknown) => () => void
-
-  ;(ctx.inject as unknown as (services: string[], callback: (owner: Context) => void) => void)(
-    ['uiConversation'],
-    (owner) => {
-      const uiConversation = asModernUiConversation(owner.get('uiConversation'))
-      if (uiConversation === undefined) {
-        throw new Error('dsh-image-gen: uiConversation has an incompatible interface')
-      }
-      promotion.enabled = true
-      const ownerRegister = owner.slots.register.bind(owner.slots) as unknown as (options: object, component: unknown) => () => void
-      owner.effect(
-      () => uiConversation.events.register(createImageResultDefinition({ isCompactTranscript })),
-      'dsh-image-gen: promoted image result node',
-      )
-      ;(owner.slots.inject as any)('conversation.chat.node', () => ownerRegister({
-        name: 'conversation.chat.node',
-        key: IMAGE_RESULT_NODE_KIND,
-        inject: () => ({ locale }),
-      }, PromotedImageResultNode))
-    },
-  )
 
   // 1. Settings item
   // Credential badges stay fresh: relay host reference-updated events to the settings card.
@@ -865,18 +740,6 @@ export function apply(ctx: Context): void {
       inject: injectSettingsFace,
     }, ImageGenerationSettingsCard))
   }
-  // Composer tool-row pill (DSH official slot: 'conversation.input.right', the
-  // seat right beside the model select): switch the default image provider
-  // without leaving the chat. Writes the same 'provider' field as the card.
-  const injectComposerPill = (owner: Context): void => {
-    const ownerRegister = owner.slots.register.bind(owner.slots) as unknown as (options: object, component: unknown) => () => void
-    ;(owner.slots.inject as (key: string, factory: () => () => void) => void)('conversation.input.right', () => ownerRegister({
-      name: 'conversation.input.right',
-      id: 'image-provider',
-      order: 10,
-      inject: (): ProviderPillFace => ({ scope, credentials: credentialsProxy, locale, credentialEvents }),
-    }, ImageProviderPill))
-  }
   // Credentials resolve through a mutable holder: hosts expose the service
   // synchronously (probed now) or later (deferred inject below). The card and
   // the pill mount unconditionally — a missing service degrades only the key
@@ -904,7 +767,6 @@ export function apply(ctx: Context): void {
   /** False while the host core exposes no credentials service (preview cores). */
   const credentialsAvailable = (): boolean => credentialsRef.current !== undefined
   injectSettingsItem(ctx)
-  injectComposerPill(ctx)
   // Preview cores can expose the credentials service after this plugin loads:
   // adopt it late and refresh every mounted card through the shared events.
   ctx.inject(['remote.credentials'], (remoteCtx) => {
@@ -917,81 +779,7 @@ export function apply(ctx: Context): void {
     notifyCredentialsUpdated()
   })
 
-  // 2. Tool result view card in chat stream
-  ctx.slots.inject('tool.call.toolview', () => register({
-    name: 'tool.call.toolview',
-    key: 'generate_image',
-    inject: (): ImageCardFace => ({ locale, promoted: promotion.enabled }),
-  }, GeneratedImageCard))
-  ctx.slots.inject('tool.call.toolview', () => register({
-    name: 'tool.call.toolview',
-    key: 'edit_image',
-    inject: (): ImageCardFace => ({ locale, promoted: promotion.enabled }),
-  }, GeneratedImageCard))
-
-  // 3. Native conversation view tab (DSH official slot: 'conversation.view')
-  ;(ctx.slots.inject as any)('conversation.view', () => register({
-    name: 'conversation.view',
-    id: 'gallery',
-    order: 20,
-    label: () => {
-      const active = locale?.getSnapshot?.()?.active
-      return active?.startsWith('en') ? 'Gallery' : '画廊'
-    },
-    inject: () => ({ locale, credentialEvents }),
-  }, GalleryViewTab))
-
-  // 4. Right-sidebar studio tab (DSH 0.1.5 official `sidebar.right.pane.tab`
-  // seat): the native conversation keeps the main column while the workbench -
-  // tldraw infinite canvas + generate form + recent list - docks beside it in
-  // the old image-details seat. Two-stage registration, exactly as
-  // ui-sidebar-documentpreview does it: the type into `sidebarRightTabs`, the
-  // body into the keyed seat under the definition's id. Deferred injection
-  // keeps pre-0.1.5 hosts booting: without the service the seat simply never
-  // appears and the conversation-view gallery tab remains the only surface.
-  ;(ctx.inject as unknown as (services: string[], callback: (owner: Context) => void) => void)(
-    ['sidebarRightTabs'],
-    (owner) => {
-      const sidebarTabs = owner.get('sidebarRightTabs') as SidebarRightTabsFace
-      const sidebarTitle = (): string => {
-        const active = locale?.getSnapshot?.()?.active
-        return active?.startsWith('en') ? 'Image Studio' : '图像工作台'
-      }
-      // Stage one - the page type. The guide entry is the only one registered
-      // (the shipped guide declares none), so `defaultSeed` lands every new
-      // sidebar straight onto the studio tab.
-      owner.effect(() => sidebarTabs.register({
-        id: SIDEBAR_STUDIO_TAB_ID,
-        kind: SIDEBAR_STUDIO_TAB_KIND,
-        priority: 'extension',
-        title: () => sidebarTitle(),
-        guide: [{ order: 100, title: () => sidebarTitle() }],
-      }), 'dsh-image-gen: sidebar studio tab type')
-      // Stage two - the body, keyed by the definition id.
-      const ownerRegister = owner.slots.register.bind(owner.slots) as unknown as (options: object, component: unknown) => () => void
-      ;(owner.slots.inject as (key: string, factory: () => () => void) => void)('sidebar.right.pane.tab', () => ownerRegister({
-        name: 'sidebar.right.pane.tab',
-        key: SIDEBAR_STUDIO_TAB_ID,
-        inject: (): GalleryViewTabProps => ({
-          locale,
-          credentialEvents,
-          inSidebar: true,
-          defaultTab: 'studio',
-          initialCanvasSurface: 'infinite',
-        }),
-      }, GalleryViewTab))
-    },
-  )
-}
-
-function asModernUiConversation(value: unknown): ModernUiConversation | undefined {
-  if (value === null || typeof value !== 'object') return undefined
-  const events = (value as { events?: unknown }).events
-  if (events === null || typeof events !== 'object') return undefined
-  return typeof (events as { register?: unknown }).register === 'function'
-    ? value as ModernUiConversation
-    : undefined
-}
+  }
 
 function asCredentialsRemote(value: unknown): CredentialsRemote | undefined {
   if (value === null || typeof value !== 'object') return undefined
@@ -1182,9 +970,6 @@ export function ImageGenerationSettingsCard(props: SettingsCardProps) {
   const [providerMessageIsError, setProviderMessageIsError] = useState(false)
   const [saveToWorkspace, setSaveToWorkspace] = useState(() => props.scope.getSnapshot().value?.saveToWorkspace ?? true)
   const [workspaceFolder, setWorkspaceFolder] = useState(() => props.scope.getSnapshot().value?.workspaceFolder ?? 'dsh-image-gen')
-  const [showPill, setShowPill] = useState(() => props.scope.getSnapshot().value?.showProviderPill === true)
-  const [uiMessage, setUiMessage] = useState('')
-  const [uiMessageIsError, setUiMessageIsError] = useState(false)
   const [workspaceMessage, setWorkspaceMessage] = useState('')
   const [workspaceMessageIsError, setWorkspaceMessageIsError] = useState(false)
   const [rows, setRows] = useState<Record<Provider, ProviderRowState>>(() => rowsFromSettings(props.scope.getSnapshot().value))
@@ -1345,7 +1130,6 @@ export function ImageGenerationSettingsCard(props: SettingsCardProps) {
     setDefaultProvider(value?.provider ?? 'google')
     setSaveToWorkspace(value?.saveToWorkspace ?? true)
     setWorkspaceFolder(value?.workspaceFolder ?? 'dsh-image-gen')
-    setShowPill(value?.showProviderPill === true)
     setRows(current => {
       const next = {} as Record<Provider, ProviderRowState>
       for (const provider of IMAGE_PROVIDERS) {
@@ -1658,19 +1442,13 @@ export function ImageGenerationSettingsCard(props: SettingsCardProps) {
     })
   }
 
-  /** The pill toggle saves immediately, like the default-provider radio. */
-  const toggleShowPill = (next: boolean): void => {
-    setShowPill(next)
-    setUiMessage(''); setUiMessageIsError(false)
-    void props.scope.set('showProviderPill', next).catch((cause: unknown) => {
-      setShowPill(snapshot.value?.showProviderPill === true)
-      setUiMessage(cause instanceof Error ? cause.message : String(cause))
-      setUiMessageIsError(true)
-    })
-  }
-
   const renderCloudBody = (provider: CloudImageProvider) => {
     const row = rows[provider]
+    // A stored model the catalog does not advertise stays selectable, so the
+    // picker always reflects the value this row is actually using.
+    const pickOptions = row.model.length > 0 && !row.modelOptions.includes(row.model)
+      ? [row.model, ...row.modelOptions]
+      : row.modelOptions
     const keyRef = cloudCredentialRef(provider) ?? ''
     const keyReadOnly = row.keyInfo?.writable === false
     const keyUnavailable = !credentialsAvailable()
@@ -1737,6 +1515,30 @@ export function ImageGenerationSettingsCard(props: SettingsCardProps) {
               )
             ) : null}
           </label>
+
+          {/* The pulled models get a real <select> outside the field's <label>:
+              Chrome's datalist filters its suggestions by the input's current
+              value — a stored model name matching none of the pulled ids opens
+              an empty list — and a control nested in a <label> has its
+              activation routed to the labelled input instead. */}
+          {modelPullSupported(provider) && row.modelOptions.length > 0 ? (
+            <label className="dsh-ig-field">
+              <span className="dsh-ig-label">{t('modelPick')}</span>
+              <select
+                className="dsh-ig-input dsh-ig-select"
+                value={row.model.length > 0 ? row.model : ''}
+                onChange={event => { if (event.target.value.length > 0) updateRow(provider, { model: event.target.value }) }}
+                disabled={!snapshot.writable}
+              >
+                <option value="">{t('modelPickPlaceholder', { count: String(row.modelOptions.length) })}</option>
+                {pickOptions.map(id => (
+                  <option key={id} value={id}>
+                    {row.modelOptions.includes(id) ? id : `${id} ${t('modelPickCurrent')}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {provider === 'openai-compat' ? (
             <label className="dsh-ig-field">
               <span className="dsh-ig-label">{t('editFormat')}</span>
@@ -2020,22 +1822,6 @@ export function ImageGenerationSettingsCard(props: SettingsCardProps) {
             ) : null}
             {workspaceMessage.length > 0 ? <p className={`dsh-ig-status${workspaceMessageIsError ? ' dsh-ig-status-error' : ''}`} role="status">{workspaceMessage}</p> : null}
           </div>
-          <div className="dsh-ig-section">
-            <span className="dsh-ig-section-title">{t('uiSection')}</span>
-            <div className="dsh-ig-field">
-              <label className="dsh-ig-check-row">
-                <input
-                  type="checkbox"
-                  checked={showPill}
-                  onChange={event => { toggleShowPill(event.target.checked) }}
-                  disabled={!snapshot.writable}
-                />
-                <span className="dsh-ig-label">{t('showPill')}</span>
-              </label>
-              <span className="dsh-ig-hint">{t('showPillHint')}</span>
-              {uiMessage.length > 0 ? <p className={`dsh-ig-status${uiMessageIsError ? ' dsh-ig-status-error' : ''}`} role="status">{uiMessage}</p> : null}
-            </div>
-          </div>
         </div>
       ) : null}
     </li>
@@ -2043,406 +1829,6 @@ export function ImageGenerationSettingsCard(props: SettingsCardProps) {
 }
 
 /** Keep the legacy Tool row for old DSH and hand modern results to the independent Chat node. */
-export function GeneratedImageCard(props: ImageCardProps) {
-  const result = imageResultFromBlock(props.block)
-  if (props.promoted && result !== undefined) return <PromotedResultNotice locale={props.locale} />
-  return <ImageResultCard result={result} locale={props.locale} sessionId={(props as any).sessionId} />
-}
-
-/** Render modern image artifacts as final conversation output instead of Tool process content. */
-export function PromotedImageResultNode(props: ImageResultNodeProps) {
-  return <div className="dsh-ig-promoted-results">
-    {props.node.data.results.map(result =>
-      <ImageResultCard key={result.attachment.attachmentId} result={result} locale={props.locale} sessionId={(props as any).sessionId} />)}
-  </div>
-}
-
-function PromotedResultNotice({ locale }: { locale?: LocaleService | undefined }) {
-  const lang = usePluginLanguage(locale)
-  return <div className="dsh-ig-loading">{DICT[lang].resultShown}</div>
-}
-
-function ImageResultCard({
-  result,
-  locale,
-  sessionId,
-}: {
-  result?: ImageResultPresentation | undefined
-  locale?: LocaleService | undefined
-  sessionId?: string | undefined
-}) {
-  const attachment = result?.attachment
-  const originId = attachment?.attachmentId
-  const [revisionChain, setRevisionChain] = useState<ConversationImageRevisionChain>(() =>
-    loadConversationImageRevisionChain(String(originId ?? ''))
-  )
-  const selectedRevision = revisionChain.revisions[revisionChain.currentIndex - 1]
-  const activeAttachment = selectedRevision?.attachment ?? attachment
-  const activeResult = selectedRevision !== undefined ? {
-    prompt: selectedRevision.prompt,
-    provider: selectedRevision.provider,
-    model: selectedRevision.model,
-    output: selectedRevision.output,
-    createdAt: selectedRevision.createdAt,
-    ...(result?.sourceAttachmentIds !== undefined && result.sourceAttachmentIds.length > 0
-      ? { sourceAttachmentIds: result.sourceAttachmentIds }
-      : {}),
-  } : result
-  const savedTo = result?.savedTo
-  const [url, setUrl] = useState<string>()
-  const [blob, setBlob] = useState<Blob>()
-  const [error, setError] = useState<string>()
-  const [previewOpen, setPreviewOpen] = useState(false)
-  const [toast, setToast] = useState<string>()
-  const [regenerateOpen, setRegenerateOpen] = useState(false)
-  const [regeneratePrompt, setRegeneratePrompt] = useState('')
-  const [regenerateError, setRegenerateError] = useState<string>()
-  const [isRegenerating, setIsRegenerating] = useState(false)
-  const regenerateControllerRef = useRef<AbortController>()
-  const regenerateTextareaRef = useRef<HTMLTextAreaElement>(null)
-  const lang = usePluginLanguage(locale)
-
-  const t = (keyName: DictKey, params?: Record<string, string>): string => {
-    const dict = lang === 'en' ? DICT.en : DICT.zh
-    let text: string = dict[keyName] || DICT.zh[keyName] || keyName
-    if (params) {
-      for (const [k, v] of Object.entries(params)) {
-        text = text.replace(`{${k}}`, v)
-      }
-    }
-    return text
-  }
-
-  // Historical cards still populate the gallery. Canvas delivery subscribes
-  // to live session events instead, so mounting old cards cannot replay images.
-  useEffect(() => {
-    if (result === undefined) return
-
-    void saveGalleryItem({
-      id: result.attachment.attachmentId,
-      attachment: result.attachment,
-      prompt: result.prompt,
-      provider: result.provider as ImageProvider,
-      model: result.model,
-      output: result.output,
-      ...(result.savedTo ? { savedTo: result.savedTo } : {}),
-      ...(result.seed !== undefined ? { seed: result.seed } : {}),
-      ...(result.sourceAttachmentIds !== undefined && result.sourceAttachmentIds.length > 0
-        ? { sourceAttachmentIds: [...result.sourceAttachmentIds] }
-        : {}),
-      ...(sessionId ? { sessionId } : {}),
-    })
-  }, [result?.attachment.attachmentId])
-
-  useEffect(() => {
-    if (!originId) return
-    regenerateControllerRef.current?.abort()
-    regenerateControllerRef.current = undefined
-    setIsRegenerating(false)
-    setRegenerateOpen(false)
-    setRevisionChain(loadConversationImageRevisionChain(String(originId)))
-  }, [originId])
-
-  useEffect(() => () => { regenerateControllerRef.current?.abort() }, [])
-
-  useEffect(() => {
-    if (!regenerateOpen || isRegenerating) return
-    const frame = requestAnimationFrame(() => {
-      regenerateTextareaRef.current?.focus()
-      regenerateTextareaRef.current?.select()
-    })
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setRegenerateOpen(false)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      cancelAnimationFrame(frame)
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [regenerateOpen, isRegenerating])
-
-  useEffect(() => {
-    if (!previewOpen) return
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPreviewOpen(false)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => { window.removeEventListener('keydown', onKeyDown) }
-  }, [previewOpen])
-
-  const currentUrlRef = useRef<string | undefined>()
-
-  useEffect(() => {
-    return () => {
-      if (currentUrlRef.current !== undefined) {
-        URL.revokeObjectURL(currentUrlRef.current)
-        currentUrlRef.current = undefined
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    if (activeAttachment === undefined) return
-    let canceled = false
-    void fetchAttachmentBlob(activeAttachment).then(resBlob => {
-      if (canceled) return
-      setBlob(resBlob)
-      setError(undefined)
-      const nextUrl = URL.createObjectURL(resBlob)
-      if (currentUrlRef.current !== undefined) {
-        URL.revokeObjectURL(currentUrlRef.current)
-      }
-      currentUrlRef.current = nextUrl
-      setUrl(nextUrl)
-    }).catch(cause => {
-      if (canceled) return
-      setError(cause instanceof Error ? cause.message : String(cause))
-    })
-    return () => {
-      canceled = true
-    }
-  }, [activeAttachment?.attachmentId])
-
-  const copy = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (!blob) return
-    const ok = await copyImageBlob(blob)
-    setToast(ok ? t('copiedImage') : t('copyFailed'))
-    setTimeout(() => { setToast(undefined) }, 2000)
-  }
-
-  const download = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (!url) return
-    const a = document.createElement('a')
-    a.href = url
-    a.download = activeAttachment?.name || `dsh-image-${Date.now()}.png`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-  }
-
-  const openNewTab = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (!url) return
-    window.open(url, '_blank', 'noopener,noreferrer')
-  }
-
-  const openRegenerate = (event: React.MouseEvent) => {
-    event.stopPropagation()
-    if (activeResult === undefined || isRegenerating) return
-    setRegeneratePrompt(activeResult.prompt)
-    setRegenerateError(undefined)
-    setRegenerateOpen(true)
-  }
-
-  const cancelRegenerate = () => {
-    regenerateControllerRef.current?.abort()
-    regenerateControllerRef.current = undefined
-    setIsRegenerating(false)
-    setRegenerateOpen(false)
-    setRegenerateError(undefined)
-  }
-
-  const regenerate = async () => {
-    if (activeResult === undefined || !originId || isRegenerating || regeneratePrompt.trim().length === 0) return
-    setIsRegenerating(true)
-    setRegenerateError(undefined)
-    // Non-blocking: close dialog immediately so user can continue chatting/scrolling!
-    setRegenerateOpen(false)
-    const controller = new AbortController()
-    regenerateControllerRef.current = controller
-    try {
-      const request = conversationRegenerateRequest(
-        activeResult,
-        regeneratePrompt,
-        selectedRevision === undefined ? undefined : { ratio: selectedRevision.ratio, quality: selectedRevision.quality },
-      )
-      const response = await fetch(STUDIO_ROUTE, {
-        method: 'POST',
-        credentials: 'same-origin',
-        signal: controller.signal,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(request),
-      })
-      const payload = await response.json().catch(() => null) as StudioGenerateResponse | { error?: string } | null
-      if (!response.ok || payload === null || !('attachment' in payload)) {
-        throw new Error(payload && 'error' in payload && payload.error ? payload.error : t('regenerateFailed'))
-      }
-      const revision: ConversationImageRevision = {
-        attachment: payload.attachment,
-        prompt: payload.prompt,
-        provider: payload.provider,
-        model: payload.model,
-        output: payload.output,
-        createdAt: payload.createdAt,
-        ratio: request.ratio,
-        quality: request.quality,
-      }
-      const savedOk = await saveGalleryItem({
-        id: String(revision.attachment.attachmentId),
-        attachment: revision.attachment,
-        prompt: revision.prompt,
-        provider: revision.provider,
-        model: revision.model,
-        createdAt: revision.createdAt,
-        aspectRatio: revision.ratio,
-        imageSize: revision.quality,
-        output: revision.output,
-        ...(savedTo ? { savedTo } : {}),
-        ...(sessionId ? { sessionId } : {}),
-      })
-      const next = appendConversationImageRevision(String(originId), revision)
-      setRevisionChain(next)
-      setToast(savedOk ? t('regenerate') : t('regenerateSaveFailed'))
-      setTimeout(() => { setToast(undefined) }, 2000)
-    } catch (cause) {
-      if (!controller.signal.aborted) {
-        const errMsg = cause instanceof Error ? cause.message : String(cause)
-        setError(errMsg)
-        setToast(errMsg)
-        setTimeout(() => { setToast(undefined) }, 3500)
-      }
-    } finally {
-      if (regenerateControllerRef.current === controller) {
-        regenerateControllerRef.current = undefined
-        setIsRegenerating(false)
-      }
-    }
-  }
-
-  const selectVersion = (index: number) => {
-    if (!originId || isRegenerating) return
-    setRevisionChain(selectConversationImageRevision(String(originId), index))
-  }
-
-  const canRegenerate = activeResult !== undefined
-    && (CLOUD_IMAGE_PROVIDERS as readonly string[]).includes(activeResult.provider)
-    && activeResult.model.trim().length > 0
-  const versionTotal = revisionChain.revisions.length + 1
-  const versionCurrent = revisionChain.currentIndex + 1
-
-  if (attachment === undefined) return <div className="dsh-ig-loading">{t('generating')}</div>
-  return <section className="dsh-ig-result" aria-label={t('generatedTitle')}>
-    <div className="dsh-ig-result-title">{t('generatedTitle')}</div>
-    {savedTo !== undefined ? <div className="dsh-ig-savedto">{t('savedToPath')}: {savedTo}</div> : null}
-    {error !== undefined ? <div className="dsh-ig-error">{error}</div> : null}
-    {url === undefined && error === undefined ? <div className="dsh-ig-loading">{t('loading')}</div> : null}
-    {url !== undefined ? <div className="dsh-ig-container">
-      <img
-        className="dsh-ig-image"
-        src={url}
-        alt={activeAttachment?.name ?? 'Generated image'}
-        onClick={() => { if (!isRegenerating) setPreviewOpen(true) }}
-      />
-      {isRegenerating ? (
-        <div className="dsh-ig-regenerate-overlay">
-          <div className="dsh-ig-regenerate-spinner" />
-          <span className="dsh-ig-regenerate-overlay-text">{t('regenerating')}</span>
-          <button type="button" className="dsh-ig-regenerate-overlay-cancel" onClick={cancelRegenerate}>
-            {t('cancel')}
-          </button>
-        </div>
-      ) : null}
-      <div className="dsh-ig-toolbar">
-        {canRegenerate ? <button type="button" className="dsh-ig-tool-btn" disabled={isRegenerating} title={isRegenerating ? t('regenerating') : t('regenerate')} onClick={openRegenerate}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>
-        </button> : null}
-        <button type="button" className="dsh-ig-tool-btn" title={t('copyImg')} onClick={(e) => { void copy(e) }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        </button>
-        <button type="button" className="dsh-ig-tool-btn" title={t('download')} onClick={download}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        </button>
-        <button type="button" className="dsh-ig-tool-btn" title={t('openNewTab')} onClick={openNewTab}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-        </button>
-        {toast ? <div className="dsh-ig-toast">{toast}</div> : null}
-      </div>
-      {versionTotal > 1 ? <div className="dsh-ig-version-nav" aria-label={t('versionLabel', { current: String(versionCurrent), total: String(versionTotal) })}>
-        <button type="button" title={t('versionPrevious')} disabled={revisionChain.currentIndex === 0 || isRegenerating} onClick={(event) => { event.stopPropagation(); selectVersion(revisionChain.currentIndex - 1) }}>‹</button>
-        <span className="dsh-ig-version-count">{versionCurrent}/{versionTotal}</span>
-        <button type="button" title={t('versionNext')} disabled={revisionChain.currentIndex >= revisionChain.revisions.length || isRegenerating} onClick={(event) => { event.stopPropagation(); selectVersion(revisionChain.currentIndex + 1) }}>›</button>
-      </div> : null}
-    </div> : null}
-
-    {previewOpen && url !== undefined ? <div className="dsh-ig-lightbox-backdrop" onClick={() => { setPreviewOpen(false) }}>
-      <div className="dsh-ig-lightbox-img-wrap" onClick={(e) => { e.stopPropagation() }}>
-        <img
-          className="dsh-ig-lightbox-img"
-          src={url}
-          alt={activeAttachment?.name ?? 'Generated image preview'}
-        />
-      </div>
-    </div> : null}
-    {regenerateOpen && activeResult !== undefined ? <div className="dsh-ig-regenerate-backdrop" onMouseDown={(event) => {
-      if (event.target === event.currentTarget && !isRegenerating) setRegenerateOpen(false)
-    }}>
-      <div className="dsh-ig-regenerate-dialog" role="dialog" aria-modal="true" aria-labelledby={`dsh-ig-regenerate-${String(originId)}`}>
-        <h3 id={`dsh-ig-regenerate-${String(originId)}`}>{t('regenerateTitle')}</h3>
-        <p>{t('regenerateHint')}</p>
-        <label>
-          <span>{t('prompt')}</span>
-          <textarea
-            ref={regenerateTextareaRef}
-            value={regeneratePrompt}
-            maxLength={2000}
-            disabled={isRegenerating}
-            onChange={(event) => setRegeneratePrompt(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-                event.preventDefault()
-                void regenerate()
-              }
-            }}
-          />
-        </label>
-        {regenerateError ? <p className="dsh-ig-regenerate-error" role="alert">{regenerateError}</p> : null}
-        <div className="dsh-ig-regenerate-actions">
-          <button type="button" className="dsh-ig-regenerate-cancel" onClick={cancelRegenerate}>{t('cancel')}</button>
-          <button type="button" className="dsh-ig-regenerate-confirm" disabled={isRegenerating || regeneratePrompt.trim().length === 0} onClick={() => { void regenerate() }}>
-            {t('confirmRegenerate')}
-          </button>
-        </div>
-      </div>
-    </div> : null}
-  </section>
-}
-
-function usePluginLanguage(locale: LocaleService | undefined): 'en' | 'zh' {
-  const [lang, setLang] = useState<'en' | 'zh'>(() => locale?.getSnapshot?.()?.active?.startsWith('en') ? 'en' : 'zh')
-  useEffect(() => locale?.subscribe?.(() => {
-    setLang(locale?.getSnapshot?.()?.active?.startsWith('en') ? 'en' : 'zh')
-  }), [locale])
-  return lang
-}
-
-function imageResultFromBlock(block: ToolCallBlock): ImageResultPresentation | undefined {
-  const attachment = imageRef(block)
-  if (attachment === undefined) return undefined
-  const blockValue = block as unknown as {
-    meta?: Record<string, unknown>
-    resultView?: { meta?: Record<string, unknown> }
-    call?: { args?: { prompt?: string; source_attachment_id?: string; source_attachment_ids?: string[] } }
-  }
-  const meta = blockValue.meta ?? blockValue.resultView?.meta
-  const sourceIds = Array.isArray(blockValue.call?.args?.source_attachment_ids)
-    ? blockValue.call?.args?.source_attachment_ids
-    : typeof blockValue.call?.args?.source_attachment_id === 'string'
-      ? [blockValue.call?.args?.source_attachment_id]
-      : undefined
-  return {
-    attachment,
-    prompt: typeof meta?.prompt === 'string' ? meta.prompt : blockValue.call?.args?.prompt ?? 'Generated Image',
-    provider: typeof meta?.provider === 'string' ? meta.provider : 'google',
-    model: typeof meta?.model === 'string' ? meta.model : '',
-    output: typeof meta?.output === 'string' ? meta.output : '',
-    ...(typeof meta?.savedTo === 'string' ? { savedTo: meta.savedTo } : {}),
-    ...(typeof meta?.seed === 'number' ? { seed: meta.seed } : {}),
-    ...(sourceIds !== undefined && sourceIds.length > 0 ? { sourceAttachmentIds: sourceIds } : {}),
-  }
-}
-
 function modelOf(provider: Provider, value: ImageSettings | undefined): string {
   const stored = provider === 'comfyui'
     ? activeComfyUIWorkflow(value ?? {})?.name

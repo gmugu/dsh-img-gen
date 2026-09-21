@@ -570,4 +570,57 @@ describe('dashscope model pull', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('denied', { status: 401 })))
     await expect(fetchDashScopeImageModels({}, 'bad-key')).resolves.toEqual({ ok: false, reason: 'unauthorized' })
   })
+
+  // A MaaS gateway (the Qwen Token Plan, for one) implements no native list
+  // route; both catalog and probe must fall back to the OpenAI-style one rather
+  // than reporting HTTP 404 for a perfectly usable endpoint.
+  it('falls back to the OpenAI-style catalog when the native list route is absent', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/compatible-mode/v1/models')) {
+        return new Response(JSON.stringify({
+          data: [{ id: 'qwen3.6-plus' }, { id: 'qwen-image-2.0' }, { id: 'wan2.7-image-pro' }],
+        }), { status: 200 })
+      }
+      return new Response('', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await fetchDashScopeImageModels({ dashscopeEndpoint: 'https://gw.example.com/api/v1' }, 'dash-key')
+    expect(result).toEqual({ ok: true, models: ['qwen-image-2.0', 'wan2.7-image-pro'] })
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://gw.example.com/compatible-mode/v1/models')
+  })
+
+  it('explains an endpoint that exposes no catalog at all', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
+    await expect(fetchDashScopeImageModels({ dashscopeEndpoint: 'https://gw.example.com/api/v1' }, 'dash-key'))
+      .resolves.toMatchObject({ ok: false, reason: 'error' })
+    const result = await fetchDashScopeImageModels({ dashscopeEndpoint: 'https://gw.example.com/api/v1' }, 'dash-key') as { message: string }
+    expect(result.message).toContain('手工填写模型名')
+  })
+
+  it('probes a catalog-less gateway through the native image route', async () => {
+    const calls: string[] = []
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${String(input)}`)
+      if (calls.length <= 2) return new Response('', { status: 404 })
+      expect(JSON.parse(String(init?.body))).toEqual({ model: 'qwen-image-3.0-pro' })
+      return new Response('{"code":"InvalidParameter","message":"Field required: input.messages"}', { status: 400 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(probeProviderConnection('dashscope', {
+      dashscopeEndpoint: 'https://gw.example.com/api/v1',
+      dashscopeModel: 'qwen-image-3.0-pro',
+    }, 'dash-key')).resolves.toEqual({ ok: true })
+    expect(calls[2]).toBe('POST https://gw.example.com/api/v1/services/aigc/multimodal-generation/generation')
+  })
+
+  it('reports an unauthorized catalog-less gateway as unauthorized', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/compatible-mode/v1/models')) return new Response('denied', { status: 403 })
+      return new Response('', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(probeProviderConnection('dashscope', { dashscopeEndpoint: 'https://gw.example.com/api/v1' }, 'bad-key'))
+      .resolves.toEqual({ ok: false, reason: 'unauthorized' })
+  })
 })

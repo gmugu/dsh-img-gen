@@ -6,32 +6,21 @@ import * as dshSettings from '@deepseek-ai/dsh-settings'
 import { defineTool, type ToolResult } from '@deepseek-ai/dsh-tools'
 import { Config, migrateOpenAICompatConfig, resolveProvider, selectComfyUIWorkflow, withProviderOverrides, type AspectRatio, type ImageSize } from './config.js'
 import { requireApiKey, resolveApiKey } from './credentials.js'
-import { CanvasMirror } from './canvas-state.js'
-import { serveCanvasState } from './canvas-state-route.js'
-import { serveCanvasAsset } from './canvas-asset-route.js'
-import { CANVAS_ASSET_ROUTE } from './shared.js'
-import { registerCanvasTools, resolveCanvasSelectionReferences } from './canvas-tools.js'
 import { editComfyUIImage, generateComfyUIImage } from './comfyui.js'
 import { editDashScopeImage, generateDashScopeImage } from './dashscope.js'
 import { editGoogleImage, generateGoogleImage } from './google.js'
-import { IMAGE_ROUTE, DELETE_ROUTE, SAVE_WORKSPACE_ROUTE, imageAttachmentFromMeta, serveImage, serveDelete, serveSaveWorkspace } from './image-route.js'
+import { imageAttachmentFromMeta } from './image-route.js'
 import { editOpenAICompatibleImage, generateOpenAICompatibleImage } from './openai-compatible.js'
 import { type ResolvedReferenceImage, resolveReferenceImages } from './reference-image.js'
 import { editSeedreamImage } from './seedream.js'
 import { generateSubscriptionImage, registerSubscriptionRoutes, SubscriptionManager } from './subscription.js'
-import { CANVAS_STATE_ROUTE, IMAGE_GENERATION_NAMESPACE, IMAGE_PROVIDERS, INSPIRATION_ROUTE, STUDIO_ROUTE, TEST_CONNECTION_ROUTE, mergeComfyUIPrompt, type ImageProvider } from './shared.js'
-import { createInspirationRoute } from './inspiration-route.js'
-import { generateFromStudio, describeStudio } from './studio.js'
-import { serveStudio } from './studio-route.js'
+import { IMAGE_GENERATION_NAMESPACE, IMAGE_PROVIDERS, TEST_CONNECTION_ROUTE, mergeComfyUIPrompt, type ImageProvider } from './shared.js'
 import { serveTestConnection } from './test-route.js'
-import { deleteImageFromWorkspace, getDshWorkspaceRoots, getDshWorkspacesFull, saveImageToWorkspace } from './workspace-save.js'
+import { saveImageToWorkspace } from './workspace-save.js'
 
 export { Config } from './config.js'
-export { IMAGE_ROUTE, DELETE_ROUTE, SAVE_WORKSPACE_ROUTE, imageAttachmentFromMeta } from './image-route.js'
-export { STUDIO_ROUTE } from './shared.js'
-export { INSPIRATION_ROUTE } from './shared.js'
+export { imageAttachmentFromMeta } from './image-route.js'
 export { TEST_CONNECTION_ROUTE } from './shared.js'
-export { CANVAS_STATE_ROUTE } from './shared.js'
 
 export const name = 'dsh-image-gen'
 export const inject = ['tools', 'attachments', 'credentials', 'webServer']
@@ -62,10 +51,6 @@ export function apply(ctx: Context, config: Config = {}): void {
   // rewritten, so both rows coexist after any upgrade.
   let current: () => Config = () => migrateOpenAICompatConfig(config)
   const knownWorkspaceRoots = new Set<string>()
-  // Host-side mirror of the workbench infinite canvas: fed by the canvas-state
-  // route, read by the canvas tools, the edit_image canvas_selection source,
-  // and the system-prompt context. Session-scratch, never persisted.
-  const canvasMirror = new CanvasMirror()
   // Subscription image accounts: login flows, blob storage, refresh, and the
   // vendor wire calls. One instance per application; tokens stay host-side.
   const subscriptionManager = new SubscriptionManager(ctx)
@@ -76,43 +61,6 @@ export function apply(ctx: Context, config: Config = {}): void {
     onChange: () => {},
   })
   ctx.effect(() => ctx.webServer.register({
-    kind: 'exact', path: IMAGE_ROUTE,
-    handler: (req, res) => serveImage(req, res, { readImage: ref => ctx.attachments.readImage(ref) }),
-  }), 'dsh-image-gen: image route')
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'exact', path: DELETE_ROUTE,
-    handler: (req, res) => serveDelete(req, res, {
-      deleteWorkspaceImage: async filePath => {
-        const discovered = await getDshWorkspaceRoots().catch(() => [])
-        return deleteImageFromWorkspace(filePath, new Set([...knownWorkspaceRoots, ...discovered, process.cwd()]))
-      },
-    }),
-  }), 'dsh-image-gen: delete route')
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'exact', path: SAVE_WORKSPACE_ROUTE,
-    handler: (req, res) => serveSaveWorkspace(req, res, {
-      readImage: ref => ctx.attachments.readImage(ref),
-      saveToWorkspace: options => {
-        if (options.workspaceRoot) {
-          knownWorkspaceRoots.add(options.workspaceRoot)
-        }
-        return saveImageToWorkspace({
-          workspaceRoot: options.workspaceRoot,
-          folder: current().workspaceFolder,
-          attachmentId: options.attachmentId,
-          mediaType: options.mediaType,
-          data: options.data,
-        })
-      },
-      getActiveWorkspaceRoot: () => Array.from(knownWorkspaceRoots)[0] || process.cwd(),
-      getAllowedWorkspaceRoots: async () => {
-        const discovered = await getDshWorkspaceRoots().catch(() => [])
-        return new Set([...knownWorkspaceRoots, ...discovered, process.cwd()])
-      },
-      isSaveEnabled: () => current().saveToWorkspace !== false,
-    }),
-  }), 'dsh-image-gen: save workspace route')
-  ctx.effect(() => ctx.webServer.register({
     kind: 'exact', path: TEST_CONNECTION_ROUTE,
     handler: (req, res) => serveTestConnection(req, res, {
       resolveKey: provider => resolveApiKey(ctx, provider),
@@ -120,68 +68,6 @@ export function apply(ctx: Context, config: Config = {}): void {
       subscriptionManager,
     }),
   }), 'dsh-image-gen: test connection route')
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'exact', path: CANVAS_STATE_ROUTE,
-    handler: (req, res) => serveCanvasState(req, res, {
-      mirror: canvasMirror,
-      // Base64 inflates the PNG by ~4/3; the slack covers the JSON envelope.
-      maxBodyBytes: Math.ceil(ctx.attachments.imageLimits.maxImageBytes * 1.4) + 256 * 1024,
-      maxImageBytes: ctx.attachments.imageLimits.maxImageBytes,
-    }),
-  }), 'dsh-image-gen: canvas state route')
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'exact', path: CANVAS_ASSET_ROUTE,
-    handler: (req, res) => serveCanvasAsset(req, res, {
-      maxImageBytes: ctx.attachments.imageLimits.maxImageBytes,
-      saveImage: image => ctx.attachments.saveImage(image),
-    }),
-  }), 'dsh-image-gen: canvas asset route')
-  // A few lines of live canvas context per model request. The service is an
-  // optional dependency: hosts without dsh-system-prompt boot unchanged and
-  // the canvas tools remain the model's way to discover the canvas.
-  ctx.inject(['systemPrompt'], (promptCtx: Context) => {
-    promptCtx.systemPrompt.context({
-      name: 'dsh-image-gen:canvas',
-      order: 60,
-      text: () => canvasMirror.digest(),
-    })
-  })
-  registerCanvasTools(ctx, canvasMirror, {
-    // Materialization hook: view_canvas persists a screenshot only when the
-    // model actually views it. The content-addressed store dedupes repeat
-    // views, and dead screenshots never reach the disk.
-    persistSelectionImage: image => ctx.attachments.saveImage({ data: image.data, mediaType: image.mediaType, name: 'canvas-selection' }),
-  })
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'exact', path: STUDIO_ROUTE,
-    handler: (req, res) => serveStudio(req, res, {
-      describe: async () => {
-        const base = await describeStudio(ctx, current(), subscriptionManager)
-        const workspaces = await getDshWorkspacesFull().catch(() => [])
-        const activeRoot = Array.from(knownWorkspaceRoots)[0] || workspaces[0]?.path || process.cwd()
-        return {
-          ...base,
-          workspaceRoot: activeRoot,
-          workspaces,
-        }
-      },
-      generate: (input, signal) => {
-        const fallbackRoot = Array.from(knownWorkspaceRoots)[0] || process.cwd()
-        return generateFromStudio(ctx, current(), input, signal, fallbackRoot, subscriptionManager)
-      },
-      maxBodyBytes: Math.ceil(ctx.attachments.imageLimits.maxImageBytes * 1.4 * 5) + 256 * 1024,
-    }),
-  }), 'dsh-image-gen: studio route')
-  const serveInspiration = createInspirationRoute()
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'prefix', path: INSPIRATION_ROUTE,
-    handler: (req, res) => {
-      const originalUrl = req.url ?? '/'
-      req.url = originalUrl.startsWith(INSPIRATION_ROUTE) ? originalUrl.slice(INSPIRATION_ROUTE.length) || '/' : originalUrl
-      return serveInspiration(req, res)
-    },
-  }), 'dsh-image-gen: inspiration route')
-
   ctx.tools.register(defineTool({
     name: 'generate_image',
     description: 'Generate a new image with the configured provider. Use when the user asks to create or draw a new image; use edit_image instead when they want to change an existing image. Give a complete visual prompt including subject, composition, style, lighting, and any exact text that should appear. The optional provider/model arguments switch provider or model for this call only when the user asks for a specific one. A successful image is attached directly to the conversation and may also be saved under the session workspace. Do not call read, glob, or other tools to locate or verify the image.',
@@ -244,12 +130,11 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   ctx.tools.register(defineTool({
     name: 'edit_image',
-    description: 'Edit, combine, or restyle existing images with the configured provider. Images attached inline to the latest human message are already readable DSH attachments even when no workspace file exists. In that case, call edit_image immediately with prompt only; NEVER call read_image, glob, or shell to locate them, and NEVER invent @ paths. All inline images will be used in upload order. For specific older conversation images use source_attachment_id or source_attachment_ids; both canonical sha256: IDs and full bare SHA-256 digests are accepted. For files the user explicitly names in the workspace use source_path or source_paths. For what the user selected or drew on the image-gen workbench canvas (for example a hand-drawn sketch) use source=canvas_selection; canvas_state can verify a selection exists first. Provide exactly one selector field. Without a selector, images from the latest human message take priority; only when that message has no images does editing fall back to the newest conversation image.',
+    description: 'Edit, combine, or restyle existing images with the configured provider. Images attached inline to the latest human message are already readable DSH attachments even when no workspace file exists. In that case, call edit_image immediately with prompt only; NEVER call read_image, glob, or shell to locate them, and NEVER invent @ paths. All inline images will be used in upload order. For specific older conversation images use source_attachment_id or source_attachment_ids; both canonical sha256: IDs and full bare SHA-256 digests are accepted. For files the user explicitly names in the workspace use source_path or source_paths. Provide at most one selector field. Without a selector, images from the latest human message take priority; only when that message has no images does editing fall back to the newest conversation image.',
     parameters: {
       prompt: { type: 'string', required: true, description: 'Describe the changes to make while preserving everything else that should remain.' },
       provider: { type: 'string', enum: ['google', 'openai', 'openai-compat', 'seedream', 'dashscope', 'xai', 'zhipu', 'comfyui', 'chatgpt-sub', 'grok-sub', 'google-sub'], description: 'Optional provider for this call only (for example when the user asks to use a specific provider); omit to use the configured default. chatgpt-sub, grok-sub, and google-sub edit images through the logged-in subscription account instead of an API key.' },
       model: { type: 'string', description: 'Optional model name for this call only, overriding the configured model. Not used by ComfyUI (use workflow instead) nor by the subscription providers (model fixed by the subscription).' },
-      source: { type: 'string', enum: ['canvas_selection'], description: 'Use the current selection on the image-gen workbench infinite canvas as the reference image(s): full-resolution originals when the selection is conversation-generated images, plus a screenshot of the whole selection when it also contains other content (hand-drawn strokes, pasted images). Choose this when the user refers to what they selected or drew on the canvas; combine with no other selector field.' },
       source_attachment_id: { type: 'string', description: 'Optional attachment id of a specific image already present in the current conversation.' },
       source_attachment_ids: { type: 'array', items: { type: 'string' }, description: 'Optional ordered attachment ids of multiple images already present in the current conversation. Prompt references such as image 1 and image 2 follow this order.' },
       source_path: { type: 'string', description: 'Optional absolute or workspace-relative path of a specific image file inside the active session workspace. Prefer this when the user names a saved file.' },
@@ -262,33 +147,16 @@ export function apply(ctx: Context, config: Config = {}): void {
     output: imageOutput('Edited'),
     async execute(args, exec): Promise<GeneratedValue> {
       const active = resolveProvider(withProviderOverrides(current(), providerOverrideOf(args.provider), args.model))
-      const canvasSelection = args.source === 'canvas_selection'
-      if (canvasSelection && (
-        args.source_attachment_id !== undefined
-        || Array.isArray(args.source_attachment_ids)
-        || args.source_path !== undefined
-        || Array.isArray(args.source_paths)
-      )) {
-        throw new Error('edit_image source=canvas_selection cannot be combined with source_attachment_id, source_attachment_ids, source_path, or source_paths; provide exactly one selector')
-      }
-      const sourceImages: ResolvedReferenceImage[] = canvasSelection
-        ? await resolveCanvasSelectionReferences({
-          mirror: canvasMirror,
-          attachments: ctx.attachments,
-          ...(exec.agent === undefined ? {} : { agent: exec.agent }),
-          maxBytes: ctx.attachments.imageLimits.maxImageBytes,
-          signal: exec.signal,
-        })
-        : await resolveReferenceImages({
-          ...(exec.agent === undefined ? {} : { agent: exec.agent }),
-          attachments: ctx.attachments,
-          ...(typeof args.source_attachment_id === 'string' ? { sourceAttachmentId: args.source_attachment_id } : {}),
-          ...(Array.isArray(args.source_attachment_ids) ? { sourceAttachmentIds: args.source_attachment_ids } : {}),
-          ...(typeof args.source_path === 'string' ? { sourcePath: args.source_path } : {}),
-          ...(Array.isArray(args.source_paths) ? { sourcePaths: args.source_paths } : {}),
-          maxBytes: ctx.attachments.imageLimits.maxImageBytes,
-          signal: exec.signal,
-        })
+      const sourceImages: ResolvedReferenceImage[] = await resolveReferenceImages({
+        ...(exec.agent === undefined ? {} : { agent: exec.agent }),
+        attachments: ctx.attachments,
+        ...(typeof args.source_attachment_id === 'string' ? { sourceAttachmentId: args.source_attachment_id } : {}),
+        ...(Array.isArray(args.source_attachment_ids) ? { sourceAttachmentIds: args.source_attachment_ids } : {}),
+        ...(typeof args.source_path === 'string' ? { sourcePath: args.source_path } : {}),
+        ...(Array.isArray(args.source_paths) ? { sourcePaths: args.source_paths } : {}),
+        maxBytes: ctx.attachments.imageLimits.maxImageBytes,
+        signal: exec.signal,
+      })
 
       if (active.provider === 'comfyui') {
         if (sourceImages.length > 1) {

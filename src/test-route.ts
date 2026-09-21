@@ -6,6 +6,7 @@ import type { SubscriptionManager } from './subscription.js'
 import {
   DEFAULT_COMFYUI_BASE_URL,
   DEFAULT_DASHSCOPE_ENDPOINT,
+  DEFAULT_DASHSCOPE_MODEL,
   DEFAULT_OPENAI_BASE_URL,
   DEFAULT_SEEDREAM_BASE_URL,
   DEFAULT_XAI_BASE_URL,
@@ -186,10 +187,28 @@ export function parseDashScopeImageModelIds(payload: unknown): string[] {
 /** Gemini list-models pagination cap; one page comfortably covers the catalog. */
 const GOOGLE_MODELS_PAGE_SIZE = 1000
 
+/**
+ * DashScope-compatible MaaS gateways serve no native `/api/v1/models` route but
+ * do expose the OpenAI-style catalog beside it. Returns undefined for an
+ * endpoint that is not an absolute URL.
+ */
+export function dashscopeCompatibleModelsUrl(endpoint: string): string | undefined {
+  try {
+    return `${new URL(endpoint).origin}/compatible-mode/v1/models`
+  } catch {
+    return undefined
+  }
+}
+
+/** DashScope catalog filter: the Qwen-Image and Wan (wanx / wan2.x) families. */
+export function filterDashScopeImageModelIds(ids: readonly string[]): string[] {
+  return ids.filter(id => /qwen-image|wanx|wan\d/i.test(id))
+}
+
 /** Shared HTTP outcome for probes and model pulls: a JSON payload or a classified failure. */
 type ClassifiedResponse =
   | { ok: true; payload: unknown }
-  | { ok: false; reason: 'unauthorized' | 'error'; message?: string }
+  | { ok: false; reason: 'unauthorized' | 'error'; message?: string; status?: number }
 
 /** Fetch with the shared timeout and classify the outcome; secrets never leave redacted. */
 async function fetchClassifiedJson(
@@ -212,6 +231,7 @@ async function fetchClassifiedJson(
   return {
     ok: false,
     reason: 'error',
+    status: response.status,
     message: `HTTP ${String(response.status)}${text.length > 0 ? `: ${redactSecrets(text, apiKey).slice(0, 300)}` : ''}`,
   }
 }
@@ -283,8 +303,59 @@ export async function fetchDashScopeImageModels(
   url.searchParams.set('page_no', '1')
   url.searchParams.set('page_size', '100')
   const result = await fetchClassifiedJson(url, { authorization: `Bearer ${apiKey}` }, apiKey, signal)
-  if (!result.ok) return result
-  return { ok: true, models: parseDashScopeImageModelIds(result.payload) }
+  if (result.ok) return { ok: true, models: parseDashScopeImageModelIds(result.payload) }
+  // A MaaS gateway (for example the Qwen Token Plan) answers 404 here because it
+  // implements no native list route — not because the credential is wrong. Try
+  // the OpenAI-style catalog beside the native base before reporting a failure.
+  if (result.status === 404 || result.status === 405) {
+    const compatible = dashscopeCompatibleModelsUrl(base)
+    if (compatible !== undefined) {
+      const listed = await fetchClassifiedJson(compatible, { authorization: `Bearer ${apiKey}` }, apiKey, signal)
+      if (listed.ok) return { ok: true, models: filterDashScopeImageModelIds(parseOpenAIModelIds(listed.payload)) }
+      if (listed.reason === 'unauthorized') return listed
+    }
+    return { ok: false, reason: 'error', message: '该端点不提供 /models 列表，请手工填写模型名（例如 qwen-image-2.0）' }
+  }
+  return result
+}
+
+/**
+ * Probe a DashScope-compatible endpoint that serves no model catalog: the
+ * OpenAI-style list beside the native base first, then the native image route
+ * itself. A 400 from that route proves endpoint, credential, and model name are
+ * all accepted (the request is refused only for its missing `input`), which is
+ * exactly what a connectivity probe is asking.
+ */
+async function probeDashScopeWithoutCatalog(
+  config: Config,
+  apiKey: string,
+  signal?: AbortSignal | undefined,
+): Promise<ProbeResult> {
+  const configured = config.dashscopeEndpoint?.trim() ?? ''
+  const base = configured.length > 0 ? configured : DEFAULT_DASHSCOPE_ENDPOINT
+  const compatible = dashscopeCompatibleModelsUrl(base)
+  if (compatible !== undefined) {
+    const listed = await fetchClassifiedJson(compatible, { authorization: `Bearer ${apiKey}` }, apiKey, signal)
+    if (listed.ok) return { ok: true }
+    if (listed.reason === 'unauthorized') return listed
+  }
+  const model = config.dashscopeModel?.trim() ?? DEFAULT_DASHSCOPE_MODEL
+  const response = await fetch(`${base.replace(/\/+$/, '')}/services/aigc/multimodal-generation/generation`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model }),
+    signal: signal ?? AbortSignal.timeout(PROBE_TIMEOUT_MS),
+  }).catch((error: unknown) => {
+    throw new Error(error instanceof Error ? error.message : String(error))
+  })
+  if (response.status === 400) return { ok: true }
+  if (response.status === 401 || response.status === 403) return { ok: false, reason: 'unauthorized' }
+  const text = await response.text().catch(() => '')
+  return {
+    ok: false,
+    reason: 'error',
+    message: `HTTP ${String(response.status)}${text.length > 0 ? `: ${redactSecrets(text, apiKey).slice(0, 200)}` : ''}`,
+  }
 }
 
 /** Run one provider probe and classify the outcome; secrets never leave redacted. */
@@ -302,7 +373,11 @@ export async function probeProviderConnection(
   }
   const target = probeTarget(provider, config, apiKey)
   const result = await fetchClassifiedJson(target.url, target.headers, apiKey, signal)
-  return result.ok ? { ok: true } : result
+  if (result.ok) return { ok: true }
+  if (provider === 'dashscope' && (result.status === 404 || result.status === 405)) {
+    return probeDashScopeWithoutCatalog(config, apiKey, signal)
+  }
+  return result
 }
 
 /** Probe the local ComfyUI service without any credential. */
