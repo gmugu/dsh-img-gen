@@ -86,6 +86,127 @@ describe('generateDashScopeImage', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('rejects a size the service would refuse, naming the accepted form', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(generateDashScopeImage({
+      apiKey: 'sk-dashscope-test',
+      endpoint,
+      model: 'qwen-image-3.0',
+      prompt: 'test',
+      size: '1K',
+      maxBytes: 1024 * 1024,
+      signal,
+    })).rejects.toThrow('Invalid image size "1K": use "WIDTH*HEIGHT" such as 1024*1024 or 1280*720.')
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a size tier this route has no default for instead of forwarding it', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(generateDashScopeImage({
+      apiKey: 'sk-dashscope-test',
+      endpoint,
+      model: 'qwen-image-3.0',
+      prompt: 'test',
+      size: 'auto',
+      maxBytes: 1024 * 1024,
+      signal,
+    })).rejects.toThrow('Invalid image size "auto"')
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('omits size entirely when the caller asks for the service default', async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const urlStr = String(url)
+      if (urlStr.includes('/services/aigc/multimodal-generation/generation')) {
+        return jsonResponse({ output: { choices: [{ message: { content: [{ image: 'https://dashscope-result.oss.aliyuncs.com/q.png' }] } }] } })
+      }
+      return imageResponse(imagePngBytes, 'image/png')
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await generateDashScopeImage({
+      apiKey: 'sk-dashscope-test',
+      endpoint,
+      model: 'qwen-image-2.0',
+      prompt: 'keep my aspect ratio',
+      maxBytes: 1024 * 1024,
+      signal,
+    })
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as {
+      parameters: Record<string, unknown>
+    }
+    expect(body.parameters).not.toHaveProperty('size')
+  })
+
+  it('honours a non-default size and normalizes every separator to an asterisk', async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const urlStr = String(url)
+      if (urlStr.includes('/services/aigc/multimodal-generation/generation')) {
+        return jsonResponse({ output: { choices: [{ message: { content: [{ image: 'https://dashscope-result.oss.aliyuncs.com/q.png' }] } }] } })
+      }
+      return imageResponse(imagePngBytes, 'image/png')
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await generateDashScopeImage({
+      apiKey: 'sk-dashscope-test',
+      endpoint,
+      model: 'qwen-image-2.0',
+      prompt: 'wide shot',
+      size: '1664×928',
+      maxBytes: 1024 * 1024,
+      signal,
+    })
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as {
+      parameters: { size: string }
+    }
+    expect(body.parameters.size).toBe('1664*928')
+  })
+
+  it('accepts the Wan family only when the row allows it (Qwen Token Plan)', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(generateDashScopeImage({
+      apiKey: 'sk-dashscope-test',
+      endpoint: 'https://token-plan.cn-beijing.maas.aliyuncs.com/api/v1',
+      model: 'wan2.7-image',
+      prompt: 'test',
+      maxBytes: 1024 * 1024,
+      signal,
+    })).rejects.toThrow('Unsupported DashScope image model wan2.7-image. Configure a qwen-image model.')
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    fetchMock.mockImplementation(async (url: string | URL | Request) => {
+      const urlStr = String(url)
+      if (urlStr.includes('/services/aigc/multimodal-generation/generation')) {
+        return jsonResponse({ output: { choices: [{ message: { content: [{ image: 'https://dashscope-result.oss.aliyuncs.com/w.png' }] } }] } })
+      }
+      return imageResponse(imagePngBytes, 'image/png')
+    })
+    const result = await generateDashScopeImage({
+      apiKey: 'sk-dashscope-test',
+      endpoint: 'https://token-plan.cn-beijing.maas.aliyuncs.com/api/v1',
+      model: 'wan2.7-image',
+      prompt: 'test',
+      size: '1024*1024',
+      maxBytes: 1024 * 1024,
+      signal,
+      allowWanModels: true,
+    })
+    expect(result.mediaType).toBe('image/png')
+    expect(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[0]))
+      .toBe('https://token-plan.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation')
+  })
+
   it('throws upstream error on submit failure', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('Invalid API key', { status: 401 })))
 

@@ -44,8 +44,11 @@ dsh plugin --profile <你的 profile> add github:gmugu/dsh-img-gen
 | 项 | 说明 |
 | :-- | :-- |
 | Provider | 在配置页的 Provider 行里选定；部分 Provider 需要填 Base URL / 模型名 |
-| API Key | 填在对应 Provider 行内，写入 DSH Credentials（不落明文）。若同名环境变量已提供（如 `DASHSCOPE_API_KEY`），该行会显示为**只读**，需在环境变量来源处修改 |
+| API Key | 填在对应 Provider 行内，写入 DSH Credentials（不落明文）。**千问 Token Plan 行读取的 ref 是 `QWEN_TOKEN_PLAN_CN_API_KEY`**（与 `llm-pi-ai` 聊天路由同一个凭据）；某 ref 若已由环境变量提供，该行会显示为**只读**，需在环境变量来源处修改 |
 | 测试连接 / 拉取模型 | 按当前 Key 探测端点并拉取可用模型；拉取成功后可从新增的下拉中选择 |
+| 输出尺寸 | 生成时两条阿里行始终显式发送 `1024*1024`；图生图按 `size` > `aspect_ratio` > 参考图尺寸 的优先级取一个值——参考图尺寸已知且总像素在 `512*512 … 2048*2048` 内就沿用原图 `W*H`（保持原分辨率），都取不到就完全不发送 `size`，由服务端按参考图比例输出总像素≈1024×1024 |
+| 比例换算 | `aspect_ratio`（`16:9` 等）在 Google 行原样使用，在两条阿里行换算成官方推荐分辨率（`16:9 → 1280*720`、`9:16 → 720*1280`、`4:3 → 1280*960`、`3:4 → 960*1280`、`3:2 → 1152*768`、`2:3 → 768*1152`、`1:1 → 1024*1024`）——该原生路由只认 `WIDTH*HEIGHT`，不能转发比例。其他 provider 会忽略 `aspect_ratio`，需要尺寸请直接传 `size` |
+| 尺寸校验 | 只要请求了具体的 `WIDTH*HEIGHT`，返回后会按附件记录的真实像素尺寸复核；超出"服务端取整到 16 的倍数"的容差，就在结果文本里给出 `WARNING`，不再静默返回比例不对的图 |
 | 落盘 | `saveToWorkspace` 打开后，生成的图片会自动写入当前会话工作区的 `dsh-image-gen/` 目录 |
 | 单次覆盖 | 调用工具时可传 `provider` / `model` 临时切换上游，不改动默认配置 |
 
@@ -60,6 +63,7 @@ dsh plugin --profile <你的 profile> add github:gmugu/dsh-img-gen
 | OpenAI 兼容中转 | ✅ | ✅ | 需自填 Base URL；可切换 multipart / `jsonImageUrlArray` 两种编辑体 |
 | 火山 Seedream (Ark) | ✅ | ✅ | 可控制输出格式 / 水印 / 背景 |
 | 阿里 DashScope（通义万相 / Qwen-Image） | ✅ | ✅ | 走 DashScope 原生 `services/aigc/multimodal-generation/generation`；**图生图最多 3 张参考图** |
+| 千问 Token Plan（阿里云 MaaS 网关） | ✅ | ✅ | 同一条原生路由，独立端点/凭据（`QWEN_TOKEN_PLAN_CN_API_KEY`）；默认模型 `qwen-image-2.0`，也支持 `wan2.7-image`（图生图不发 `size`，因为该路由未公布其尺寸窗口） |
 | xAI Grok | ✅ | ✅ | 走 OpenAI 兼容协议 |
 | 智谱 GLM-Image | ✅ | — | 上游本身不支持图生图 |
 | 本地 ComfyUI | ✅ | ✅（单张） | 需填 Host 可访问地址并导入 API Format 工作流（含 `{{prompt}}`） |

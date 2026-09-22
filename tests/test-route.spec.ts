@@ -57,6 +57,11 @@ describe('probe targets', () => {
     expect(probeTarget('dashscope', {}, 'dash-key').url).toBe('https://dashscope.aliyuncs.com/api/v1/models')
     expect(probeTarget('dashscope', { dashscopeEndpoint: 'https://dashscope.example.com/api/v1' }, 'dash-key').url)
       .toBe('https://dashscope.example.com/api/v1/models')
+    // The Qwen Token Plan row probes its own MaaS endpoint, not Bailian's.
+    expect(probeTarget('qwen-token-plan', {}, 'dash-key').url)
+      .toBe('https://token-plan.cn-beijing.maas.aliyuncs.com/api/v1/models')
+    expect(probeTarget('qwen-token-plan', { qwenTokenPlanEndpoint: 'https://tp.example.com/api/v1' }, 'dash-key').url)
+      .toBe('https://tp.example.com/api/v1/models')
   })
 
   it('probes the xAI and Zhipu models endpoints with Bearer auth', () => {

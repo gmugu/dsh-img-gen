@@ -4,6 +4,13 @@ import type { Message } from '@deepseek-ai/dsh-llm';
 export interface ResolvedReferenceImage {
     data: Uint8Array;
     mediaType: ImageMediaType;
+    /**
+     * Dimensions of the stored bytes, when the attachment store recorded them.
+     * Alibaba-native editing sends them as the output size so the edit keeps the
+     * original resolution; a workspace file read straight from disk has none.
+     */
+    width?: number;
+    height?: number;
 }
 /** The small latest-DSH session surface this Bundle depends on. */
 export interface ReferenceImageAgent {

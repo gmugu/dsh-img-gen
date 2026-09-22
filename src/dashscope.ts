@@ -10,6 +10,12 @@ export interface DashScopeImageOptions {
   size?: string
   maxBytes: number
   signal?: AbortSignal
+  /**
+   * Accept the Wan image family on this route. Bailian serves only Qwen-Image
+   * here (Wan lives behind its own asynchronous API); the Qwen Token Plan
+   * gateway serves Qwen-Image and Wan on the same multimodal-generation route.
+   */
+  allowWanModels?: boolean
 }
 
 export interface DashScopeEditOptions extends DashScopeImageOptions {
@@ -35,7 +41,7 @@ export async function generateDashScopeImage(options: DashScopeImageOptions): Pr
   data: Uint8Array
   mediaType: ImageAttachmentRef['mediaType']
 }> {
-  assertQwenImageModel(options.model)
+  assertImageModel(options.model, options.allowWanModels === true)
   const formattedSize = formatSize(options.size)
   return requestQwenImage({
     ...options,
@@ -57,7 +63,7 @@ export async function editDashScopeImage(options: DashScopeEditOptions): Promise
   mediaType: ImageAttachmentRef['mediaType']
 }> {
   if (options.sourceImages.length > 3) throw new Error(`DashScope image editing supports at most 3 reference images; this selection resolved ${options.sourceImages.length}. Select fewer images or choose a provider that supports more references. No images were omitted.`)
-  assertQwenImageModel(options.model)
+  assertImageModel(options.model, options.allowWanModels === true)
   const formattedSize = formatSize(options.size)
   return requestQwenImage({
     ...options,
@@ -81,15 +87,32 @@ export async function editDashScopeImage(options: DashScopeEditOptions): Promise
   })
 }
 
-function assertQwenImageModel(model: string): void {
-  if (!model.toLowerCase().startsWith('qwen-image')) {
-    throw new Error(`Unsupported DashScope image model ${model}. Configure a qwen-image model.`)
-  }
+function assertImageModel(model: string, allowWanModels: boolean): void {
+  const id = model.toLowerCase()
+  if (id.startsWith('qwen-image')) return
+  if (allowWanModels && id.startsWith('wan')) return
+  throw new Error(allowWanModels
+    ? `Unsupported image model ${model} for this endpoint. Use a qwen-image or wan image model such as qwen-image-2.0 or wan2.7-image.`
+    : `Unsupported DashScope image model ${model}. Configure a qwen-image model.`)
 }
 
+/**
+ * Normalize the output size to the form this route accepts. The service rejects
+ * anything but `WIDTH*HEIGHT` ("Invalid size format: 1024x1024, expected format:
+ * width*height"), so the common separators are folded to `*` and everything
+ * else fails loudly here instead of as an opaque 400 — or, worse, as a size the
+ * caller believes was applied. `auto` is deliberately not passed through: this
+ * route documents no such value, and omitting `size` is how a caller asks for
+ * the service's own default.
+ */
 function formatSize(size: string | undefined): string | undefined {
-  if (size === undefined || size.length === 0) return undefined
-  return size.replace('x', '*')
+  const raw = size?.trim() ?? ''
+  if (raw.length === 0) return undefined
+  const normalized = raw.replace(/[x×X*]/g, '*')
+  if (!/^\d+\*\d+$/.test(normalized)) {
+    throw new Error(`Invalid image size ${JSON.stringify(size)}: use "WIDTH*HEIGHT" such as 1024*1024 or 1280*720.`)
+  }
+  return normalized
 }
 
 function toDataUrl(image: { data: Uint8Array; mediaType: ImageMediaType }): string {

@@ -7,6 +7,8 @@ import {
   DEFAULT_COMFYUI_BASE_URL,
   DEFAULT_DASHSCOPE_ENDPOINT,
   DEFAULT_DASHSCOPE_MODEL,
+  DEFAULT_QWEN_TOKEN_PLAN_ENDPOINT,
+  DEFAULT_QWEN_TOKEN_PLAN_MODEL,
   DEFAULT_OPENAI_BASE_URL,
   DEFAULT_SEEDREAM_BASE_URL,
   DEFAULT_XAI_BASE_URL,
@@ -53,6 +55,9 @@ export function probeTarget(
   const headers = { authorization: `Bearer ${apiKey ?? ''}` }
   if (provider === 'dashscope') {
     return { url: joinUrl(config.dashscopeEndpoint ?? DEFAULT_DASHSCOPE_ENDPOINT, 'models'), headers }
+  }
+  if (provider === 'qwen-token-plan') {
+    return { url: joinUrl(config.qwenTokenPlanEndpoint ?? DEFAULT_QWEN_TOKEN_PLAN_ENDPOINT, 'models'), headers }
   }
   if (provider === 'seedream') {
     return { url: joinUrl(config.seedreamBaseURL ?? DEFAULT_SEEDREAM_BASE_URL, 'models'), headers }
@@ -292,10 +297,13 @@ export async function fetchDashScopeImageModels(
   config: Config,
   apiKey: string | undefined,
   signal?: AbortSignal | undefined,
+  provider: 'dashscope' | 'qwen-token-plan' = 'dashscope',
 ): Promise<ModelsResult> {
   if (apiKey === undefined) return { ok: false, reason: 'missing-key' }
-  const configured = config.dashscopeEndpoint?.trim() ?? ''
-  const base = configured.length > 0 ? configured : DEFAULT_DASHSCOPE_ENDPOINT
+  const configured = (provider === 'qwen-token-plan' ? config.qwenTokenPlanEndpoint : config.dashscopeEndpoint)?.trim() ?? ''
+  const base = configured.length > 0
+    ? configured
+    : provider === 'qwen-token-plan' ? DEFAULT_QWEN_TOKEN_PLAN_ENDPOINT : DEFAULT_DASHSCOPE_ENDPOINT
   const url = new URL(joinUrl(base, 'models'))
   // Ask the service to pre-filter image-generation models (IG capability) and
   // return a generous page; the parser re-checks the capability field anyway.
@@ -327,19 +335,25 @@ export async function fetchDashScopeImageModels(
  * exactly what a connectivity probe is asking.
  */
 async function probeDashScopeWithoutCatalog(
+  provider: 'dashscope' | 'qwen-token-plan',
   config: Config,
   apiKey: string,
   signal?: AbortSignal | undefined,
 ): Promise<ProbeResult> {
-  const configured = config.dashscopeEndpoint?.trim() ?? ''
-  const base = configured.length > 0 ? configured : DEFAULT_DASHSCOPE_ENDPOINT
+  const configured = (provider === 'qwen-token-plan' ? config.qwenTokenPlanEndpoint : config.dashscopeEndpoint)?.trim() ?? ''
+  const base = configured.length > 0
+    ? configured
+    : provider === 'qwen-token-plan' ? DEFAULT_QWEN_TOKEN_PLAN_ENDPOINT : DEFAULT_DASHSCOPE_ENDPOINT
   const compatible = dashscopeCompatibleModelsUrl(base)
   if (compatible !== undefined) {
     const listed = await fetchClassifiedJson(compatible, { authorization: `Bearer ${apiKey}` }, apiKey, signal)
     if (listed.ok) return { ok: true }
     if (listed.reason === 'unauthorized') return listed
   }
-  const model = config.dashscopeModel?.trim() ?? DEFAULT_DASHSCOPE_MODEL
+  const configuredModel = (provider === 'qwen-token-plan' ? config.qwenTokenPlanModel : config.dashscopeModel)?.trim() ?? ''
+  const model = configuredModel.length > 0
+    ? configuredModel
+    : provider === 'qwen-token-plan' ? DEFAULT_QWEN_TOKEN_PLAN_MODEL : DEFAULT_DASHSCOPE_MODEL
   const response = await fetch(`${base.replace(/\/+$/, '')}/services/aigc/multimodal-generation/generation`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
@@ -374,8 +388,8 @@ export async function probeProviderConnection(
   const target = probeTarget(provider, config, apiKey)
   const result = await fetchClassifiedJson(target.url, target.headers, apiKey, signal)
   if (result.ok) return { ok: true }
-  if (provider === 'dashscope' && (result.status === 404 || result.status === 405)) {
-    return probeDashScopeWithoutCatalog(config, apiKey, signal)
+  if ((provider === 'dashscope' || provider === 'qwen-token-plan') && (result.status === 404 || result.status === 405)) {
+    return probeDashScopeWithoutCatalog(provider, config, apiKey, signal)
   }
   return result
 }
@@ -459,8 +473,8 @@ export async function serveTestConnection(req: IncomingMessage, res: ServerRespo
       const apiKey = await deps.resolveKey(active as CloudImageProvider)
       result = active === 'google'
         ? await fetchGoogleImageModels(deps.config(), apiKey)
-        : active === 'dashscope'
-          ? await fetchDashScopeImageModels(deps.config(), apiKey)
+        : active === 'dashscope' || active === 'qwen-token-plan'
+          ? await fetchDashScopeImageModels(deps.config(), apiKey, undefined, active)
           : await fetchOpenAIImageModels(active as 'openai' | 'openai-compat' | 'seedream' | 'xai' | 'zhipu', deps.config(), apiKey)
     } catch (error) {
       result = { ok: false, reason: 'error', message: error instanceof Error ? error.message : String(error) }

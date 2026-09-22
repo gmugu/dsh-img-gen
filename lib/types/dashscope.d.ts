@@ -8,6 +8,12 @@ export interface DashScopeImageOptions {
     size?: string;
     maxBytes: number;
     signal?: AbortSignal;
+    /**
+     * Accept the Wan image family on this route. Bailian serves only Qwen-Image
+     * here (Wan lives behind its own asynchronous API); the Qwen Token Plan
+     * gateway serves Qwen-Image and Wan on the same multimodal-generation route.
+     */
+    allowWanModels?: boolean;
 }
 export interface DashScopeEditOptions extends DashScopeImageOptions {
     sourceImages: Array<{

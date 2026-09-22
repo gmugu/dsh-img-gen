@@ -2,4 +2,4 @@
     - id: image-gen
       name: dsh-image-gen
       config:
-        provider: dashscope
+        provider: qwen-token-plan

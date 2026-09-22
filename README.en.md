@@ -46,8 +46,11 @@ the plugin-configuration list).
 | Item | Notes |
 | :-- | :-- |
 | Provider | Pick it on the provider row; some providers need a Base URL / model name |
-| API key | Entered per provider row and stored in DSH Credentials. If the same name exists as an environment variable (e.g. `DASHSCOPE_API_KEY`) the row is **read-only** and must be changed at that source |
+| API key | Entered per provider row and stored in DSH Credentials. The **Qwen Token Plan row resolves `QWEN_TOKEN_PLAN_CN_API_KEY`** (the same credential the `llm-pi-ai` chat route uses). A reference already supplied by an environment variable makes that row **read-only**; change it at that source |
 | Test connection / Fetch models | Probes the endpoint with the stored key and lists usable models; pulled models become a dropdown |
+| Output size | Generation always sends an explicit `1024*1024` on both Alibaba rows. Editing resolves one value in the order `size` > `aspect_ratio` > reference image size: a known reference image inside `512*512 … 2048*2048` keeps its own `W*H` (and its original resolution); when none applies, no `size` is sent at all and the service keeps the reference aspect ratio at roughly 1024×1024 pixels |
+| Aspect ratio | `aspect_ratio` (e.g. `16:9`) is forwarded as-is on the Google row and translated into the service's documented resolution on both Alibaba rows (`16:9 → 1280*720`, `9:16 → 720*1280`, `4:3 → 1280*960`, `3:4 → 960*1280`, `3:2 → 1152*768`, `2:3 → 768*1152`, `1:1 → 1024*1024`) — that native route only accepts `WIDTH*HEIGHT`, so it cannot carry a ratio. Other providers ignore `aspect_ratio`; pass `size` instead |
+| Size check | Whenever a concrete `WIDTH*HEIGHT` was requested, the returned image is checked against the pixel size the attachment store recorded. Beyond the slack the service needs for rounding to a multiple of 16, the result text carries a `WARNING` instead of silently handing back a differently-shaped image |
 | Save to workspace | With `saveToWorkspace` on, generated images are written to `dsh-image-gen/` in the session workspace |
 | Per-call override | `provider` / `model` tool arguments switch upstream for one call without touching the default |
 
@@ -60,6 +63,7 @@ the plugin-configuration list).
 | OpenAI-compatible relay | ✅ | ✅ | Needs a Base URL; multipart or `jsonImageUrlArray` edit bodies |
 | Volcengine Seedream (Ark) | ✅ | ✅ | Output format / watermark / background controls |
 | Alibaba DashScope (Qwen-Image / Wan) | ✅ | ✅ | DashScope native image route; **editing accepts at most 3 reference images** |
+| Qwen Token Plan (Alibaba MaaS gateway) | ✅ | ✅ | Same native route, its own endpoint and credential (`QWEN_TOKEN_PLAN_CN_API_KEY`); default model `qwen-image-2.0`, also serves `wan2.7-image` (editing sends no `size` for it, since that route publishes no size window) |
 | xAI Grok | ✅ | ✅ | OpenAI-compatible protocol |
 | Zhipu GLM-Image | ✅ | — | Upstream model does not support editing |
 | Local ComfyUI | ✅ | ✅ (one) | Needs a reachable base URL and an API-format workflow containing `{{prompt}}` |

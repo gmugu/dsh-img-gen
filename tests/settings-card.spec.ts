@@ -34,7 +34,7 @@ function text(node: ReactNode): string {
   return 'props' in node ? text((node as Element).props.children) : ''
 }
 
-function formHarness(lang = 'zh') {
+function formHarness(lang = 'zh', provider = 'openai-compat') {
   const setKey = vi.fn(async () => ({ ok: true }))
   const setSetting = vi.fn(async () => {})
   const props = {
@@ -50,7 +50,7 @@ function formHarness(lang = 'zh') {
     hooks.cursor = 0
     return ImageGenerationSettingsCard(props)
   }
-  const row = () => elements(render()).find(element => element.key === 'openai-compat'
+  const row = () => elements(render()).find(element => element.key === provider
     && element.props.className?.startsWith('dsh-ig-provider-row '))!
   const find = (predicate: (element: Element) => boolean) => elements(row()).find(predicate)!
   elements(render()).find(element => element.props.className === 'dsh-ig-head')!.props.onClick()
@@ -58,6 +58,7 @@ function formHarness(lang = 'zh') {
   return {
     setKey, setSetting,
     rowText: () => text(row()),
+    rowElements: () => elements(row()),
     typeKey: (value: string) => find(element => element.props.type === 'password').props.onChange({ target: { value } }),
     keyValue: () => find(element => element.props.type === 'password').props.value,
     disabled: (label: string) => find(element => element.type === 'button' && text(element) === label).props.disabled,
@@ -70,6 +71,15 @@ beforeEach(() => { hooks.values = []; hooks.cursor = 0 })
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('settings card credential actions', () => {
+  it('offers no output-size control on the Alibaba rows', () => {
+    // Size is a profile constant plus the tool argument now; the card must not
+    // grow a per-row size field again.
+    const form = formHarness('zh', 'qwen-token-plan')
+
+    expect(form.rowText()).not.toContain('输出尺寸')
+    expect(form.rowElements().some(element => element.props.placeholder === '1024*1024')).toBe(false)
+  })
+
   it.each(['拉取模型', '测试连接'])('asks to save before %s without sending a request or storing the draft', async action => {
     const fetch = vi.fn(async (_url: string, _init: RequestInit) => ({ ok: true, json: async (): Promise<Record<string, unknown>> => ({ ok: false, reason: 'missing-key' }) }))
     vi.stubGlobal('fetch', fetch)

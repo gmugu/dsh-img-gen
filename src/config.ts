@@ -6,6 +6,7 @@ import {
   ARK_OUTPUT_FORMATS,
   DEFAULT_DASHSCOPE_ENDPOINT,
   DEFAULT_DASHSCOPE_MODEL,
+  DEFAULT_DASHSCOPE_SIZE,
   DEFAULT_COMFYUI_BASE_URL,
   DEFAULT_COMFYUI_TIMEOUT_MS,
   DEFAULT_COMFYUI_WORKFLOW_LABEL,
@@ -13,6 +14,8 @@ import {
   DEFAULT_GOOGLE_MODEL,
   DEFAULT_OPENAI_BASE_URL,
   DEFAULT_OPENAI_MODEL,
+  DEFAULT_QWEN_TOKEN_PLAN_ENDPOINT,
+  DEFAULT_QWEN_TOKEN_PLAN_MODEL,
   DEFAULT_SEEDREAM_BASE_URL,
   DEFAULT_SEEDREAM_MODEL,
   DEFAULT_SUBSCRIPTION_MODELS,
@@ -25,6 +28,7 @@ import {
   IMAGE_PROVIDERS,
   OPENAI_API_KEY_ENV,
   OPENAI_COMPAT_API_KEY_ENV,
+  QWEN_TOKEN_PLAN_API_KEY_ENV,
   SEEDREAM_API_KEY_ENV,
   XAI_API_KEY_ENV,
   ZHIPU_API_KEY_ENV,
@@ -42,6 +46,7 @@ export {
   ARK_OUTPUT_FORMATS,
   DEFAULT_DASHSCOPE_ENDPOINT,
   DEFAULT_DASHSCOPE_MODEL,
+  DEFAULT_DASHSCOPE_SIZE,
   DEFAULT_COMFYUI_BASE_URL,
   DEFAULT_COMFYUI_TIMEOUT_MS,
   DEFAULT_COMFYUI_WORKFLOW_LABEL,
@@ -49,6 +54,8 @@ export {
   DEFAULT_GOOGLE_MODEL,
   DEFAULT_OPENAI_BASE_URL,
   DEFAULT_OPENAI_MODEL,
+  DEFAULT_QWEN_TOKEN_PLAN_ENDPOINT,
+  DEFAULT_QWEN_TOKEN_PLAN_MODEL,
   DEFAULT_SEEDREAM_BASE_URL,
   DEFAULT_SEEDREAM_MODEL,
   DEFAULT_XAI_BASE_URL,
@@ -60,6 +67,7 @@ export {
   IMAGE_PROVIDERS,
   OPENAI_API_KEY_ENV,
   OPENAI_COMPAT_API_KEY_ENV,
+  QWEN_TOKEN_PLAN_API_KEY_ENV,
   SEEDREAM_API_KEY_ENV,
   XAI_API_KEY_ENV,
   ZHIPU_API_KEY_ENV,
@@ -124,6 +132,8 @@ export interface Config {
   seedreamBackground?: ArkBackgroundMode
   dashscopeEndpoint?: string
   dashscopeModel?: string
+  qwenTokenPlanEndpoint?: string
+  qwenTokenPlanModel?: string
   xaiBaseURL?: string
   xaiModel?: string
   zhipuBaseURL?: string
@@ -162,6 +172,8 @@ export const Config: z<Config> = z.object({
   seedreamBackground: z.union(ARK_BACKGROUND_MODES).default('opaque'),
   dashscopeEndpoint: z.string().default(DEFAULT_DASHSCOPE_ENDPOINT),
   dashscopeModel: z.string().default(DEFAULT_DASHSCOPE_MODEL),
+  qwenTokenPlanEndpoint: z.string().default(DEFAULT_QWEN_TOKEN_PLAN_ENDPOINT),
+  qwenTokenPlanModel: z.string().default(DEFAULT_QWEN_TOKEN_PLAN_MODEL),
   xaiBaseURL: z.string().default(DEFAULT_XAI_BASE_URL),
   xaiModel: z.string().default(DEFAULT_XAI_MODEL),
   zhipuBaseURL: z.string().default(DEFAULT_ZHIPU_BASE_URL),
@@ -182,7 +194,8 @@ export function resolveProvider(config: Config):
   | { provider: 'openai'; apiKeyEnv: string; model: string; baseURL: string; imageSize: string }
   | { provider: 'openai-compat'; apiKeyEnv: string; model: string; baseURL: string; imageSize: string; editFormat: 'multipart' | 'jsonImageUrlArray'; editExtra: Record<string, unknown> }
   | { provider: 'seedream'; apiKeyEnv: string; model: string; baseURL: string; imageSize: string; arkOptions: ArkOutputOptions }
-  | { provider: 'dashscope'; apiKeyEnv: string; model: string; endpoint: string; imageSize: string }
+  | { provider: 'dashscope'; apiKeyEnv: string; model: string; endpoint: string; imageSize: string; allowWanModels: boolean }
+  | { provider: 'qwen-token-plan'; apiKeyEnv: string; model: string; endpoint: string; imageSize: string; allowWanModels: boolean }
   | { provider: 'xai'; apiKeyEnv: string; model: string; baseURL: string; imageSize: string }
   | { provider: 'zhipu'; apiKeyEnv: string; model: string; baseURL: string; imageSize: string }
   | { provider: 'comfyui'; baseURL: string; workflows: ComfyUIWorkflowEntry[]; workflow?: ComfyUIWorkflowEntry; timeoutMs: number }
@@ -221,7 +234,12 @@ export function resolveProvider(config: Config):
         },
       }
     }
-    case 'dashscope': return { provider: 'dashscope', apiKeyEnv: DASHSCOPE_API_KEY_ENV, model: config.dashscopeModel ?? DEFAULT_DASHSCOPE_MODEL, endpoint: config.dashscopeEndpoint ?? DEFAULT_DASHSCOPE_ENDPOINT, imageSize: '1024*1024' }
+    // Both Alibaba rows speak the same DashScope-native multimodal-generation
+    // route; they differ by host, key family, model set, and whether the Wan
+    // image family is served there (the Qwen Token Plan gateway serves it,
+    // Bailian keeps Wan behind its own asynchronous API).
+    case 'dashscope': return { provider: 'dashscope', apiKeyEnv: DASHSCOPE_API_KEY_ENV, model: config.dashscopeModel ?? DEFAULT_DASHSCOPE_MODEL, endpoint: config.dashscopeEndpoint ?? DEFAULT_DASHSCOPE_ENDPOINT, imageSize: DEFAULT_DASHSCOPE_SIZE, allowWanModels: false }
+    case 'qwen-token-plan': return { provider: 'qwen-token-plan', apiKeyEnv: QWEN_TOKEN_PLAN_API_KEY_ENV, model: config.qwenTokenPlanModel ?? DEFAULT_QWEN_TOKEN_PLAN_MODEL, endpoint: config.qwenTokenPlanEndpoint ?? DEFAULT_QWEN_TOKEN_PLAN_ENDPOINT, imageSize: DEFAULT_DASHSCOPE_SIZE, allowWanModels: true }
     case 'xai': return { provider: 'xai', apiKeyEnv: XAI_API_KEY_ENV, model: config.xaiModel ?? DEFAULT_XAI_MODEL, baseURL: config.xaiBaseURL ?? DEFAULT_XAI_BASE_URL, imageSize: '1024x1024' }
     case 'zhipu': return { provider: 'zhipu', apiKeyEnv: ZHIPU_API_KEY_ENV, model: config.zhipuModel ?? DEFAULT_ZHIPU_MODEL, baseURL: config.zhipuBaseURL ?? DEFAULT_ZHIPU_BASE_URL, imageSize: '1024x1024' }
     case 'comfyui': {
@@ -257,6 +275,7 @@ export function withProviderOverrides(config: Config, provider?: ImageProvider, 
     case 'openai-compat': return { ...base, openaiCompatModel: trimmed }
     case 'seedream': return { ...base, seedreamModel: trimmed }
     case 'dashscope': return { ...base, dashscopeModel: trimmed }
+    case 'qwen-token-plan': return { ...base, qwenTokenPlanModel: trimmed }
     case 'xai': return { ...base, xaiModel: trimmed }
     case 'zhipu': return { ...base, zhipuModel: trimmed }
     // Subscription models are fixed by the bridge protocol; the override is ignored.

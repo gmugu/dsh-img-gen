@@ -96,8 +96,8 @@ describe('reference image compatibility boundary', () => {
       sourceAttachmentIds: ['second', 'first'],
       signal,
     })).resolves.toEqual([
-      { data: new Uint8Array([2]), mediaType: 'image/webp' },
-      { data: new Uint8Array([1]), mediaType: 'image/jpeg' },
+      { data: new Uint8Array([2]), mediaType: 'image/webp', width: 32, height: 24 },
+      { data: new Uint8Array([1]), mediaType: 'image/jpeg', width: 32, height: 24 },
     ])
     expect(readImage.mock.calls.map(([ref]) => String(ref.attachmentId))).toEqual(['second', 'first'])
   })
@@ -181,6 +181,8 @@ describe('reference image compatibility boundary', () => {
     })).resolves.toEqual({
       data: new Uint8Array([1, 2, 3]),
       mediaType: 'image/webp',
+      width: 32,
+      height: 24,
     })
     expect(deriveMessages).toHaveBeenCalledOnce()
     expect(readImage).toHaveBeenCalledWith(ref, signal)
@@ -202,8 +204,8 @@ describe('reference image compatibility boundary', () => {
       attachments: { readImage },
       signal,
     })).resolves.toEqual([
-      { data: new Uint8Array([1]), mediaType: 'image/png' },
-      { data: new Uint8Array([2]), mediaType: 'image/jpeg' },
+      { data: new Uint8Array([1]), mediaType: 'image/png', width: 32, height: 24 },
+      { data: new Uint8Array([2]), mediaType: 'image/jpeg', width: 32, height: 24 },
     ])
   })
 
@@ -247,6 +249,22 @@ describe('reference image compatibility boundary', () => {
       mediaType: 'image/jpeg',
     })
     expect(deriveMessages).not.toHaveBeenCalled()
+  })
+
+  it('leaves dimensions unset for a workspace file read straight from disk', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'dsh-image-gen-workspace-'))
+    await writeFile(join(workspaceRoot, 'plain.png'), new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+
+    const [image] = await resolveReferenceImages({
+      agent: { session: { deriveMessages: () => [], header: { cwd: workspaceRoot } } },
+      attachments: { readImage: vi.fn() },
+      sourcePaths: ['plain.png'],
+      signal,
+    })
+
+    // Nothing measured these bytes, so the editing path must not invent a size.
+    expect(image).not.toHaveProperty('width')
+    expect(image).not.toHaveProperty('height')
   })
 
   it('reads multiple workspace images in caller order', async () => {

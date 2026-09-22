@@ -34,6 +34,8 @@ interface ImageSettings {
     seedreamBackground?: 'opaque' | 'transparent';
     dashscopeEndpoint?: string;
     dashscopeModel?: string;
+    qwenTokenPlanEndpoint?: string;
+    qwenTokenPlanModel?: string;
     xaiBaseURL?: string;
     xaiModel?: string;
     zhipuBaseURL?: string;

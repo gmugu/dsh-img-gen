@@ -125,7 +125,7 @@ export interface CanvasStatePush {
 export const IMAGE_GENERATION_NAMESPACE = 'image-generation'
 
 /** Supported providers. */
-export const IMAGE_PROVIDERS = ['google', 'openai', 'openai-compat', 'seedream', 'dashscope', 'xai', 'zhipu', 'comfyui', 'chatgpt-sub', 'grok-sub', 'google-sub'] as const
+export const IMAGE_PROVIDERS = ['google', 'openai', 'openai-compat', 'seedream', 'dashscope', 'qwen-token-plan', 'xai', 'zhipu', 'comfyui', 'chatgpt-sub', 'grok-sub', 'google-sub'] as const
 export type ImageProvider = typeof IMAGE_PROVIDERS[number]
 
 /**
@@ -142,7 +142,7 @@ export function isSubscriptionProvider(provider: ImageProvider): provider is Sub
 }
 
 /** Providers supported by the first browser workbench release. */
-export const CLOUD_IMAGE_PROVIDERS = ['google', 'openai', 'openai-compat', 'seedream', 'dashscope', 'xai', 'zhipu'] as const
+export const CLOUD_IMAGE_PROVIDERS = ['google', 'openai', 'openai-compat', 'seedream', 'dashscope', 'qwen-token-plan', 'xai', 'zhipu'] as const
 export type CloudImageProvider = typeof CLOUD_IMAGE_PROVIDERS[number]
 
 /**
@@ -181,6 +181,12 @@ export const OPENAI_COMPAT_API_KEY_ENV = 'DSH_IMAGE_GEN_OPENAI_COMPAT_KEY'
 export const SEEDREAM_API_KEY_ENV = 'ARK_API_KEY'
 /** DashScope credential reference. */
 export const DASHSCOPE_API_KEY_ENV = 'DASHSCOPE_API_KEY'
+/**
+ * Qwen Token Plan credential reference. It matches the reference the plan's own
+ * LLM route uses (`llm-pi-ai` resolves `QWEN_TOKEN_PLAN_CN_API_KEY`), so the
+ * image row and the chat row share one credential.
+ */
+export const QWEN_TOKEN_PLAN_API_KEY_ENV = 'QWEN_TOKEN_PLAN_CN_API_KEY'
 /** xAI credential reference; matches the official xAI SDK environment name. */
 export const XAI_API_KEY_ENV = 'XAI_API_KEY'
 /** Zhipu credential reference; matches the official Zhipu SDK environment name. */
@@ -193,6 +199,7 @@ export const CLOUD_CREDENTIAL_REFS: Record<CloudImageProvider, string> = {
   'openai-compat': OPENAI_COMPAT_API_KEY_ENV,
   seedream: SEEDREAM_API_KEY_ENV,
   dashscope: DASHSCOPE_API_KEY_ENV,
+  'qwen-token-plan': QWEN_TOKEN_PLAN_API_KEY_ENV,
   xai: XAI_API_KEY_ENV,
   zhipu: ZHIPU_API_KEY_ENV,
 }
@@ -211,6 +218,7 @@ export const PROVIDER_DISPLAY_NAMES: Record<ImageProvider, string> = {
   'openai-compat': 'OpenAI 兼容',
   seedream: 'Seedream',
   dashscope: 'DashScope',
+  'qwen-token-plan': '千问 Token Plan',
   xai: 'xAI Grok',
   zhipu: '智谱 GLM',
   comfyui: 'ComfyUI',
@@ -314,6 +322,12 @@ export const DEFAULT_GOOGLE_ENDPOINT = 'https://generativelanguage.googleapis.co
 export const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'
 export const DEFAULT_SEEDREAM_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 export const DEFAULT_DASHSCOPE_ENDPOINT = 'https://dashscope.aliyuncs.com/api/v1'
+/**
+ * Qwen Token Plan (Alibaba MaaS) endpoint. Same DashScope-native
+ * `/services/aigc/multimodal-generation/generation` route as Bailian, but a
+ * different host, key family and model set; see the zcode text-to-image skill.
+ */
+export const DEFAULT_QWEN_TOKEN_PLAN_ENDPOINT = 'https://token-plan.cn-beijing.maas.aliyuncs.com/api/v1'
 export const DEFAULT_XAI_BASE_URL = 'https://api.x.ai/v1'
 export const DEFAULT_ZHIPU_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4'
 export const DEFAULT_COMFYUI_BASE_URL = 'http://127.0.0.1:8188'
@@ -376,6 +390,16 @@ export const DEFAULT_GOOGLE_MODEL = 'gemini-3.1-flash-image'
 export const DEFAULT_OPENAI_MODEL = 'gpt-image-2'
 export const DEFAULT_SEEDREAM_MODEL = 'doubao-seedream-5-0-260128'
 export const DEFAULT_DASHSCOPE_MODEL = 'qwen-image-3.0'
+/** Qwen Token Plan default image model (the zcode text-to-image skill's default). */
+export const DEFAULT_QWEN_TOKEN_PLAN_MODEL = 'qwen-image-2.0'
+/**
+ * Alibaba-native `parameters.size` form: `WIDTH*HEIGHT`, never `WxH`. Both the
+ * Bailian and the Qwen Token Plan rows send it explicitly on generation; the
+ * Qwen Token Plan skill documents `1024*1024` as its default. Omitting `size`
+ * instead lets the service keep the input image's aspect ratio at roughly the
+ * same total pixel count, which is what the editing path relies on.
+ */
+export const DEFAULT_DASHSCOPE_SIZE = '1024*1024'
 export const DEFAULT_XAI_MODEL = 'grok-imagine-image'
 export const DEFAULT_ZHIPU_MODEL = 'glm-image'
 
@@ -449,6 +473,99 @@ export function mergeComfyUIPrompt(preset: string | undefined, user: string): st
   return `${presetText}, ${userText}`
 }
 
+/**
+ * Total-pixel window the Alibaba-native editing route documents for an explicit
+ * `size`: `512*512` to `2048*2048` (qwen-image-2.0 series and qwen-image-3.0).
+ */
+export const ALIBABA_EDIT_SIZE_RANGE = { minTotalPixels: 512 * 512, maxTotalPixels: 2048 * 2048 } as const
+
+/**
+ * The service's documented recommended resolutions for the aspect ratios this
+ * plugin accepts, kept in the tool's own ratio order. Each ratio publishes a
+ * second, larger option (for example 1:1 also allows `1536*1536`); the smaller
+ * one is used so a ratio request stays near the plugin's ~1MP default size.
+ *
+ * This table exists because `aspect_ratio` is a Google-shaped parameter the
+ * Alibaba rows cannot forward: they take `WIDTH*HEIGHT` and nothing else, so a
+ * ratio used to be dropped on the floor and the request fell back to a square.
+ */
+export const ALIBABA_RATIO_SIZES = {
+  '1:1': '1024*1024',
+  '3:2': '1152*768',
+  '2:3': '768*1152',
+  '4:3': '1280*960',
+  '3:4': '960*1280',
+  '16:9': '1280*720',
+  '9:16': '720*1280',
+} as const
+
+/**
+ * Translate a caller's `aspect_ratio` into the Alibaba-native `size` the route
+ * actually accepts. `undefined` means the caller did not ask for a ratio; an
+ * unsupported ratio throws with the accepted list instead of quietly returning
+ * a differently-shaped image.
+ */
+export function alibabaAspectSize(aspectRatio: string | undefined): string | undefined {
+  if (aspectRatio === undefined) return undefined
+  const ratio = aspectRatio.trim()
+  if (ratio.length === 0) return undefined
+  const size = (ALIBABA_RATIO_SIZES as Record<string, string>)[ratio]
+  if (size === undefined) {
+    throw new Error(`Unsupported aspect_ratio ${JSON.stringify(aspectRatio)} for the Alibaba rows. Use one of ${Object.keys(ALIBABA_RATIO_SIZES).join(', ')}, or pass size as "WIDTH*HEIGHT" (for example 1280*720).`)
+  }
+  return size
+}
+
+/**
+ * Compare the image that came back against the size the caller asked for.
+ *
+ * The service may round an explicit size to a nearby multiple of 16, so a few
+ * pixels of slack are expected and harmless; anything beyond that means the
+ * upstream ignored or altered the request, and the caller must be told rather
+ * than left trusting a label the image does not match.
+ */
+export function sizeMismatch(
+  requested: string,
+  actual: { width: number; height: number },
+  tolerancePixels = 16,
+): string | undefined {
+  const normalized = requested.trim().replace(/[x×X*]/g, '*')
+  const match = /^(\d+)\*(\d+)$/.exec(normalized)
+  if (match === null) return undefined
+  const width = Number(match[1])
+  const height = Number(match[2])
+  if (Math.abs(actual.width - width) <= tolerancePixels && Math.abs(actual.height - height) <= tolerancePixels) return undefined
+  return `the requested size was ${String(width)}*${String(height)} but the provider returned ${String(actual.width)}×${String(actual.height)}, so the upstream ignored or altered it.`
+}
+
+/**
+ * Output size for an Alibaba-native edit call, derived from the reference image
+ * the service will actually see.
+ *
+ * `size` is sent only when it can faithfully match the original: a known,
+ * in-range reference image. Otherwise `undefined` leaves the field out, and the
+ * service keeps the input image's aspect ratio at roughly the same total pixel
+ * count — which is the documented default and never an out-of-range 400.
+ *
+ * Multi-image edits follow the last image's aspect ratio, so the last reference
+ * decides. The Wan family is excluded: the gateway documents no size window for
+ * it on this route, so guessing one would risk a rejection.
+ */
+export function alibabaEditSize(
+  sources: ReadonlyArray<{ width?: number; height?: number }>,
+  model: string,
+): string | undefined {
+  if (model.trim().toLowerCase().startsWith('wan')) return undefined
+  const last = sources[sources.length - 1]
+  const width = last?.width
+  const height = last?.height
+  if (typeof width !== 'number' || typeof height !== 'number') return undefined
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return undefined
+  const totalPixels = width * height
+  if (totalPixels < ALIBABA_EDIT_SIZE_RANGE.minTotalPixels || totalPixels > ALIBABA_EDIT_SIZE_RANGE.maxTotalPixels) return undefined
+  return `${String(width)}*${String(height)}`
+}
+
 /** Default models for the subscription channels; fixed by the bridge protocol. */
 export const DEFAULT_SUBSCRIPTION_MODELS: Record<SubscriptionProvider, string> = {
   'chatgpt-sub': 'gpt-image-2.5-flare',
@@ -463,6 +580,7 @@ export const DEFAULT_MODELS: Record<ImageProvider, string> = {
   'openai-compat': '',
   seedream: DEFAULT_SEEDREAM_MODEL,
   dashscope: DEFAULT_DASHSCOPE_MODEL,
+  'qwen-token-plan': DEFAULT_QWEN_TOKEN_PLAN_MODEL,
   xai: DEFAULT_XAI_MODEL,
   zhipu: DEFAULT_ZHIPU_MODEL,
   comfyui: DEFAULT_COMFYUI_WORKFLOW_LABEL,
@@ -478,6 +596,7 @@ export const DEFAULT_BASE_URLS: Record<ImageProvider, string> = {
   'openai-compat': '',
   seedream: DEFAULT_SEEDREAM_BASE_URL,
   dashscope: DEFAULT_DASHSCOPE_ENDPOINT,
+  'qwen-token-plan': DEFAULT_QWEN_TOKEN_PLAN_ENDPOINT,
   xai: DEFAULT_XAI_BASE_URL,
   zhipu: DEFAULT_ZHIPU_BASE_URL,
   comfyui: DEFAULT_COMFYUI_BASE_URL,

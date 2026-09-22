@@ -66,7 +66,7 @@ export declare function fetchGoogleImageModels(config: Config, apiKey: string | 
 /** Pull and filter image-capable models from an OpenAI-compatible endpoint (official, relay, Ark, xAI, Zhipu). */
 export declare function fetchOpenAIImageModels(provider: 'openai' | 'openai-compat' | 'seedream' | 'xai' | 'zhipu', config: Config, apiKey: string | undefined, signal?: AbortSignal | undefined): Promise<ModelsResult>;
 /** Pull and filter image-capable models from the DashScope native model list (`capabilities=IG`). */
-export declare function fetchDashScopeImageModels(config: Config, apiKey: string | undefined, signal?: AbortSignal | undefined): Promise<ModelsResult>;
+export declare function fetchDashScopeImageModels(config: Config, apiKey: string | undefined, signal?: AbortSignal | undefined, provider?: 'dashscope' | 'qwen-token-plan'): Promise<ModelsResult>;
 /** Run one provider probe and classify the outcome; secrets never leave redacted. */
 export declare function probeProviderConnection(provider: CloudImageProvider, config: Config, apiKey: string | undefined, signal?: AbortSignal | undefined): Promise<ProbeResult>;
 /** Probe the local ComfyUI service without any credential. */

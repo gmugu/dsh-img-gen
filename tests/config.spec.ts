@@ -3,6 +3,9 @@ import {
   Config,
   DEFAULT_DASHSCOPE_ENDPOINT,
   DEFAULT_DASHSCOPE_MODEL,
+  DEFAULT_DASHSCOPE_SIZE,
+  DEFAULT_QWEN_TOKEN_PLAN_ENDPOINT,
+  DEFAULT_QWEN_TOKEN_PLAN_MODEL,
   DEFAULT_COMFYUI_BASE_URL,
   DEFAULT_COMFYUI_TIMEOUT_MS,
   DEFAULT_COMFYUI_WORKFLOW_LABEL,
@@ -79,7 +82,20 @@ describe('resolveProvider', () => {
       apiKeyEnv: 'DASHSCOPE_API_KEY',
       endpoint: DEFAULT_DASHSCOPE_ENDPOINT,
       model: DEFAULT_DASHSCOPE_MODEL,
-      imageSize: '1024*1024',
+      imageSize: DEFAULT_DASHSCOPE_SIZE,
+      allowWanModels: false,
+    })
+  })
+
+  it('resolves the Qwen Token Plan profile with its own endpoint, model and credential', () => {
+    expect(resolveProvider({ provider: 'qwen-token-plan' })).toEqual({
+      provider: 'qwen-token-plan',
+      apiKeyEnv: 'QWEN_TOKEN_PLAN_CN_API_KEY',
+      endpoint: DEFAULT_QWEN_TOKEN_PLAN_ENDPOINT,
+      model: DEFAULT_QWEN_TOKEN_PLAN_MODEL,
+      imageSize: DEFAULT_DASHSCOPE_SIZE,
+      // The plan gateway serves the Wan family on the same route; Bailian does not.
+      allowWanModels: true,
     })
   })
 

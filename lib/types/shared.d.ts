@@ -113,7 +113,7 @@ export interface CanvasStatePush {
 /** Namespace persisted through DSH Settings. */
 export declare const IMAGE_GENERATION_NAMESPACE = "image-generation";
 /** Supported providers. */
-export declare const IMAGE_PROVIDERS: readonly ["google", "openai", "openai-compat", "seedream", "dashscope", "xai", "zhipu", "comfyui", "chatgpt-sub", "grok-sub", "google-sub"];
+export declare const IMAGE_PROVIDERS: readonly ["google", "openai", "openai-compat", "seedream", "dashscope", "qwen-token-plan", "xai", "zhipu", "comfyui", "chatgpt-sub", "grok-sub", "google-sub"];
 export type ImageProvider = typeof IMAGE_PROVIDERS[number];
 /**
  * Providers that generate through a logged-in subscription account instead
@@ -125,14 +125,14 @@ export type SubscriptionProvider = typeof SUBSCRIPTION_PROVIDERS[number];
 /** True when the provider generates through a logged-in subscription account. */
 export declare function isSubscriptionProvider(provider: ImageProvider): provider is SubscriptionProvider;
 /** Providers supported by the first browser workbench release. */
-export declare const CLOUD_IMAGE_PROVIDERS: readonly ["google", "openai", "openai-compat", "seedream", "dashscope", "xai", "zhipu"];
+export declare const CLOUD_IMAGE_PROVIDERS: readonly ["google", "openai", "openai-compat", "seedream", "dashscope", "qwen-token-plan", "xai", "zhipu"];
 export type CloudImageProvider = typeof CLOUD_IMAGE_PROVIDERS[number];
 /**
  * Providers the browser workbench can drive: the BYOK cloud set plus the
  * logged-in subscription channels. ComfyUI stays out; it has its own workflow
  * pipeline and no shared request shape.
  */
-export declare const STUDIO_PROVIDERS: readonly ["google", "openai", "openai-compat", "seedream", "dashscope", "xai", "zhipu", "chatgpt-sub", "grok-sub", "google-sub"];
+export declare const STUDIO_PROVIDERS: readonly ["google", "openai", "openai-compat", "seedream", "dashscope", "qwen-token-plan", "xai", "zhipu", "chatgpt-sub", "grok-sub", "google-sub"];
 export type StudioProvider = CloudImageProvider | SubscriptionProvider;
 /** True when the provider is selectable in the browser workbench. */
 export declare function isStudioProvider(provider: ImageProvider): provider is StudioProvider;
@@ -158,6 +158,12 @@ export declare const OPENAI_COMPAT_API_KEY_ENV = "DSH_IMAGE_GEN_OPENAI_COMPAT_KE
 export declare const SEEDREAM_API_KEY_ENV = "ARK_API_KEY";
 /** DashScope credential reference. */
 export declare const DASHSCOPE_API_KEY_ENV = "DASHSCOPE_API_KEY";
+/**
+ * Qwen Token Plan credential reference. It matches the reference the plan's own
+ * LLM route uses (`llm-pi-ai` resolves `QWEN_TOKEN_PLAN_CN_API_KEY`), so the
+ * image row and the chat row share one credential.
+ */
+export declare const QWEN_TOKEN_PLAN_API_KEY_ENV = "QWEN_TOKEN_PLAN_CN_API_KEY";
 /** xAI credential reference; matches the official xAI SDK environment name. */
 export declare const XAI_API_KEY_ENV = "XAI_API_KEY";
 /** Zhipu credential reference; matches the official Zhipu SDK environment name. */
@@ -251,6 +257,12 @@ export declare const DEFAULT_GOOGLE_ENDPOINT = "https://generativelanguage.googl
 export declare const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 export declare const DEFAULT_SEEDREAM_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3";
 export declare const DEFAULT_DASHSCOPE_ENDPOINT = "https://dashscope.aliyuncs.com/api/v1";
+/**
+ * Qwen Token Plan (Alibaba MaaS) endpoint. Same DashScope-native
+ * `/services/aigc/multimodal-generation/generation` route as Bailian, but a
+ * different host, key family and model set; see the zcode text-to-image skill.
+ */
+export declare const DEFAULT_QWEN_TOKEN_PLAN_ENDPOINT = "https://token-plan.cn-beijing.maas.aliyuncs.com/api/v1";
 export declare const DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1";
 export declare const DEFAULT_ZHIPU_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
 export declare const DEFAULT_COMFYUI_BASE_URL = "http://127.0.0.1:8188";
@@ -301,6 +313,16 @@ export declare const DEFAULT_GOOGLE_MODEL = "gemini-3.1-flash-image";
 export declare const DEFAULT_OPENAI_MODEL = "gpt-image-2";
 export declare const DEFAULT_SEEDREAM_MODEL = "doubao-seedream-5-0-260128";
 export declare const DEFAULT_DASHSCOPE_MODEL = "qwen-image-3.0";
+/** Qwen Token Plan default image model (the zcode text-to-image skill's default). */
+export declare const DEFAULT_QWEN_TOKEN_PLAN_MODEL = "qwen-image-2.0";
+/**
+ * Alibaba-native `parameters.size` form: `WIDTH*HEIGHT`, never `WxH`. Both the
+ * Bailian and the Qwen Token Plan rows send it explicitly on generation; the
+ * Qwen Token Plan skill documents `1024*1024` as its default. Omitting `size`
+ * instead lets the service keep the input image's aspect ratio at roughly the
+ * same total pixel count, which is what the editing path relies on.
+ */
+export declare const DEFAULT_DASHSCOPE_SIZE = "1024*1024";
 export declare const DEFAULT_XAI_MODEL = "grok-imagine-image";
 export declare const DEFAULT_ZHIPU_MODEL = "glm-image";
 /** One named ComfyUI API-format workflow imported through settings. */
@@ -334,6 +356,69 @@ export declare function uniqueComfyUIWorkflowName(name: string, existing: readon
  * separator, and reduced to the non-empty side when the other is blank.
  */
 export declare function mergeComfyUIPrompt(preset: string | undefined, user: string): string;
+/**
+ * Total-pixel window the Alibaba-native editing route documents for an explicit
+ * `size`: `512*512` to `2048*2048` (qwen-image-2.0 series and qwen-image-3.0).
+ */
+export declare const ALIBABA_EDIT_SIZE_RANGE: {
+    readonly minTotalPixels: number;
+    readonly maxTotalPixels: number;
+};
+/**
+ * The service's documented recommended resolutions for the aspect ratios this
+ * plugin accepts, kept in the tool's own ratio order. Each ratio publishes a
+ * second, larger option (for example 1:1 also allows `1536*1536`); the smaller
+ * one is used so a ratio request stays near the plugin's ~1MP default size.
+ *
+ * This table exists because `aspect_ratio` is a Google-shaped parameter the
+ * Alibaba rows cannot forward: they take `WIDTH*HEIGHT` and nothing else, so a
+ * ratio used to be dropped on the floor and the request fell back to a square.
+ */
+export declare const ALIBABA_RATIO_SIZES: {
+    readonly '1:1': "1024*1024";
+    readonly '3:2': "1152*768";
+    readonly '2:3': "768*1152";
+    readonly '4:3': "1280*960";
+    readonly '3:4': "960*1280";
+    readonly '16:9': "1280*720";
+    readonly '9:16': "720*1280";
+};
+/**
+ * Translate a caller's `aspect_ratio` into the Alibaba-native `size` the route
+ * actually accepts. `undefined` means the caller did not ask for a ratio; an
+ * unsupported ratio throws with the accepted list instead of quietly returning
+ * a differently-shaped image.
+ */
+export declare function alibabaAspectSize(aspectRatio: string | undefined): string | undefined;
+/**
+ * Compare the image that came back against the size the caller asked for.
+ *
+ * The service may round an explicit size to a nearby multiple of 16, so a few
+ * pixels of slack are expected and harmless; anything beyond that means the
+ * upstream ignored or altered the request, and the caller must be told rather
+ * than left trusting a label the image does not match.
+ */
+export declare function sizeMismatch(requested: string, actual: {
+    width: number;
+    height: number;
+}, tolerancePixels?: number): string | undefined;
+/**
+ * Output size for an Alibaba-native edit call, derived from the reference image
+ * the service will actually see.
+ *
+ * `size` is sent only when it can faithfully match the original: a known,
+ * in-range reference image. Otherwise `undefined` leaves the field out, and the
+ * service keeps the input image's aspect ratio at roughly the same total pixel
+ * count — which is the documented default and never an out-of-range 400.
+ *
+ * Multi-image edits follow the last image's aspect ratio, so the last reference
+ * decides. The Wan family is excluded: the gateway documents no size window for
+ * it on this route, so guessing one would risk a rejection.
+ */
+export declare function alibabaEditSize(sources: ReadonlyArray<{
+    width?: number;
+    height?: number;
+}>, model: string): string | undefined;
 /** Default models for the subscription channels; fixed by the bridge protocol. */
 export declare const DEFAULT_SUBSCRIPTION_MODELS: Record<SubscriptionProvider, string>;
 export declare const DEFAULT_MODELS: Record<ImageProvider, string>;

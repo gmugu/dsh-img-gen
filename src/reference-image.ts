@@ -12,6 +12,13 @@ import type { ContentBlock, Message } from '@deepseek-ai/dsh-llm'
 export interface ResolvedReferenceImage {
   data: Uint8Array
   mediaType: ImageMediaType
+  /**
+   * Dimensions of the stored bytes, when the attachment store recorded them.
+   * Alibaba-native editing sends them as the output size so the edit keeps the
+   * original resolution; a workspace file read straight from disk has none.
+   */
+  width?: number
+  height?: number
 }
 
 /** The small latest-DSH session surface this Bundle depends on. */
@@ -110,7 +117,12 @@ export async function resolveReferenceImages(input: {
     if (input.maxBytes !== undefined && stored.data.byteLength > input.maxBytes) {
       throw new Error(`edit_image source image is too large (${stored.data.byteLength} bytes; maximum ${input.maxBytes})`)
     }
-    return { data: stored.data, mediaType: stored.ref.mediaType }
+    return {
+      data: stored.data,
+      mediaType: stored.ref.mediaType,
+      width: stored.ref.width,
+      height: stored.ref.height,
+    }
   }))
 }
 

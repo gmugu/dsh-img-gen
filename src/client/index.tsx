@@ -62,6 +62,8 @@ interface ImageSettings {
   seedreamBackground?: 'opaque' | 'transparent'
   dashscopeEndpoint?: string
   dashscopeModel?: string
+  qwenTokenPlanEndpoint?: string
+  qwenTokenPlanModel?: string
   xaiBaseURL?: string
   xaiModel?: string
   zhipuBaseURL?: string
@@ -120,6 +122,7 @@ const DICT = {
     providerOpenAICompat: 'OpenAI 兼容（中转站）',
     providerSeedream: '字节 Seedream',
     providerDashScope: '阿里 DashScope (通义万相 / Qwen)',
+    providerQwenTokenPlan: '千问 Token Plan (阿里云 MaaS 网关)',
     providerXAI: 'xAI Grok Imagine',
     providerZhipu: '智谱 GLM-Image',
     providerComfyUI: '本地 ComfyUI',
@@ -194,6 +197,7 @@ const DICT = {
     editExtraInvalid: '附加 JSON 字段必须是合法的 JSON 对象。',
     endpointHintSeedream: '火山方舟兼容的 /api/v3 地址。',
     endpointHintDashScope: '阿里云百炼 DashScope 官方接口地址。',
+    endpointHintQwenTokenPlan: '千问 Token Plan（阿里云 MaaS 网关）地址，以 /api/v1 结尾；模型可用 qwen-image-2.0、wan2.7-image 等。',
     endpointHintXAI: 'xAI 官方 api.x.ai 的 /v1 地址。',
     endpointHintZhipu: '智谱开放平台 open.bigmodel.cn 的 /api/paas/v4 地址。',
     endpointHintComfyUI: '正在运行且 DSH Host 可以访问的 ComfyUI 地址，默认使用本机 8188 端口。',
@@ -263,6 +267,7 @@ const DICT = {
     providerOpenAICompat: 'OpenAI-compatible (relay)',
     providerSeedream: 'ByteDance Seedream',
     providerDashScope: 'Aliyun DashScope (Wanx / Qwen)',
+    providerQwenTokenPlan: 'Qwen Token Plan (Alibaba MaaS gateway)',
     providerXAI: 'xAI Grok Imagine',
     providerZhipu: 'Zhipu GLM-Image',
     providerComfyUI: 'Local ComfyUI',
@@ -337,6 +342,7 @@ const DICT = {
     editExtraInvalid: 'Extra JSON fields must be a valid JSON object.',
     endpointHintSeedream: 'Volcengine Ark compatible /api/v3 base URL.',
     endpointHintDashScope: 'Official Aliyun DashScope endpoint.',
+    endpointHintQwenTokenPlan: 'Qwen Token Plan (Alibaba MaaS gateway) endpoint ending in /api/v1; models such as qwen-image-2.0 or wan2.7-image.',
     endpointHintXAI: 'Official xAI api.x.ai /v1 base URL.',
     endpointHintZhipu: 'Zhipu open.bigmodel.cn /api/paas/v4 base URL.',
     endpointHintComfyUI: 'A running ComfyUI server reachable by the DSH Host; the default points to port 8188 on this computer.',
@@ -885,6 +891,7 @@ const CLOUD_MODEL_FIELDS = {
   'openai-compat': 'openaiCompatModel',
   seedream: 'seedreamModel',
   dashscope: 'dashscopeModel',
+  'qwen-token-plan': 'qwenTokenPlanModel',
   xai: 'xaiModel',
   zhipu: 'zhipuModel',
 } as const satisfies Record<CloudImageProvider, keyof ImageSettings>
@@ -896,6 +903,7 @@ const CLOUD_URL_FIELDS = {
   'openai-compat': 'openaiCompatBaseURL',
   seedream: 'seedreamBaseURL',
   dashscope: 'dashscopeEndpoint',
+  'qwen-token-plan': 'qwenTokenPlanEndpoint',
   xai: 'xaiBaseURL',
   zhipu: 'zhipuBaseURL',
 } as const satisfies Record<CloudImageProvider, keyof ImageSettings>
@@ -909,6 +917,7 @@ const CLOUD_HINT_KEYS = {
   dashscope: 'endpointHintDashScope',
   xai: 'endpointHintXAI',
   zhipu: 'endpointHintZhipu',
+  'qwen-token-plan': 'endpointHintQwenTokenPlan',
 } as const satisfies Record<CloudImageProvider, DictKey>
 
 /** Config field a cloud provider persists its model under. */
@@ -1117,6 +1126,7 @@ export function ImageGenerationSettingsCard(props: SettingsCardProps) {
     'openai-compat': t('providerOpenAICompat'),
     seedream: t('providerSeedream'),
     dashscope: t('providerDashScope'),
+    'qwen-token-plan': t('providerQwenTokenPlan'),
     xai: t('providerXAI'),
     zhipu: t('providerZhipu'),
     comfyui: t('providerComfyUI'),
