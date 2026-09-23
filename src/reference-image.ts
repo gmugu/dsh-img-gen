@@ -242,6 +242,10 @@ function findInBlocks(
   blocks: readonly ContentBlock[],
   sourceAttachmentId?: string,
 ): ImageAttachmentRef | undefined {
+  // DSH 0.1.6+ splits tool results into top-level `role: 'tool'` messages
+  // whose content blocks sit at the message root, so no nested block kind
+  // carries content anymore — the per-message loops in findReferenceImage(s)
+  // already visit every tool-result message.
   for (let index = blocks.length - 1; index >= 0; index -= 1) {
     const block = blocks[index]
     if (block === undefined) continue
@@ -250,10 +254,6 @@ function findInBlocks(
         return block.attachment
       }
       continue
-    }
-    if (block.type === 'tool-result') {
-      const nested = findInBlocks(block.content, sourceAttachmentId)
-      if (nested !== undefined) return nested
     }
   }
   return undefined
@@ -273,7 +273,6 @@ function collectInBlocks(blocks: readonly ContentBlock[]): ImageAttachmentRef[] 
   const refs: ImageAttachmentRef[] = []
   for (const block of blocks) {
     if (block.type === 'image') refs.push(block.attachment)
-    if (block.type === 'tool-result') refs.push(...collectInBlocks(block.content))
   }
   return refs
 }

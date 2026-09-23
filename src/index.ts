@@ -2,7 +2,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import * as dshSettings from '@deepseek-ai/dsh-settings'
+// Type-only: pulls the `settings` service declaration onto Context.
+import type {} from '@deepseek-ai/dsh-settings'
 import { defineTool, type ToolResult } from '@deepseek-ai/dsh-tools'
 import { Config, migrateOpenAICompatConfig, resolveProvider, selectComfyUIWorkflow, withProviderOverrides, type AspectRatio, type ImageSize } from './config.js'
 import { requireApiKey, resolveApiKey } from './credentials.js'
@@ -14,7 +15,7 @@ import { editOpenAICompatibleImage, generateOpenAICompatibleImage } from './open
 import { type ResolvedReferenceImage, resolveReferenceImages } from './reference-image.js'
 import { editSeedreamImage } from './seedream.js'
 import { generateSubscriptionImage, registerSubscriptionRoutes, SubscriptionManager } from './subscription.js'
-import { IMAGE_GENERATION_NAMESPACE, IMAGE_PROVIDERS, TEST_CONNECTION_ROUTE, alibabaAspectSize, alibabaEditSize, mergeComfyUIPrompt, sizeMismatch, type ImageProvider } from './shared.js'
+import { IMAGE_PROVIDERS, TEST_CONNECTION_ROUTE, alibabaAspectSize, alibabaEditSize, mergeComfyUIPrompt, sizeMismatch, type ImageProvider } from './shared.js'
 import { serveTestConnection } from './test-route.js'
 import { saveImageToWorkspace } from './workspace-save.js'
 
@@ -48,20 +49,43 @@ function providerOverrideOf(value: unknown): ImageProvider | undefined {
   return value as ImageProvider
 }
 
+/**
+ * Unwrap the volatile config the Loader hands the plugin on DSH 0.1.6+:
+ * with the whole Config schema marked volatile, `config` is a stable
+ * reference cell whose `.get()` always returns the current values (edits
+ * through the settings form update it in place without remounting). The
+ * plain-object branch only serves unit tests that call `apply` directly.
+ */
+function liveConfig(source: unknown): Config {
+  const cell = source as { get?: unknown } | null | undefined
+  const raw = cell !== null && typeof cell === 'object' && typeof cell.get === 'function'
+    ? cell.get()
+    : source
+  return (raw ?? {}) as Config
+}
+
 export function apply(ctx: Context, config: Config = {}): void {
   // Migration on every read: relay configs saved under the old single OpenAI
   // slot keep moving to the dedicated compat row until the persisted copy is
   // rewritten, so both rows coexist after any upgrade.
-  let current: () => Config = () => migrateOpenAICompatConfig(config)
+  let current: () => Config = () => migrateOpenAICompatConfig(liveConfig(config))
   const knownWorkspaceRoots = new Set<string>()
   // Subscription image accounts: login flows, blob storage, refresh, and the
   // vendor wire calls. One instance per application; tokens stay host-side.
   const subscriptionManager = new SubscriptionManager(ctx)
   registerSubscriptionRoutes(ctx, subscriptionManager)
 
-  installImageSettings(ctx, config, {
-    setSource: source => { current = () => migrateOpenAICompatConfig(source()) },
-    onChange: () => {},
+  // DSH 0.1.6+ settings: the Config schema above is volatile, so the settings
+  // service derives the editable form and keeps the live values flowing into
+  // `current()` without remounting. This bundle ships its own settings card,
+  // so opt out of the schema-generated page. The optional `ctx.inject` child
+  // is the registration pattern documented by dsh-settings; the extra
+  // `configure` probe only degrades silently in unit-test harnesses whose
+  // mock settings service omits the method.
+  ctx.inject(['settings'], (settingsCtx: Context) => {
+    const configure = (settingsCtx.settings as unknown as { configure?: (presentation: { auto?: boolean }, owner?: unknown) => () => void }).configure
+    if (typeof configure !== 'function') return
+    settingsCtx.effect(() => configure.call(settingsCtx.settings, { auto: false }, ctx.fiber), 'dsh-image-gen: settings page policy')
   })
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact', path: TEST_CONNECTION_ROUTE,
@@ -305,47 +329,4 @@ async function saveGenerated(
 function imagePresentation(result: ToolResult) {
   const attachment = imageAttachmentFromMeta(result.meta)
   return attachment === undefined ? undefined : { card: 'generic' as const, title: 'Generated image', content: [{ type: 'image' as const, attachment }] }
-}
-
-/** Settings hooks shape shared by both dsh-settings API generations. */
-interface SettingsHooks {
-  setSource: (source: () => Config) => void
-  onChange: () => void
-}
-
-/** Top-level relay functions exported by dsh-settings <= 0.1.1-rc.2. */
-interface LegacySettingsApi {
-  installSettingsSection?: {
-    (ctx: Context, ns: unknown, schema: unknown, entry: unknown, hooks: SettingsHooks): void
-  }
-  settingsNamespace?: (value: string) => unknown
-}
-
-/**
- * Wire the settings namespace across both dsh-settings API generations.
- * A namespace import keeps module loading safe on either version; the branch
- * picks the service method (0.1.2+) or the legacy top-level relay (<= rc.2),
- * and falls back to the composition entry with a warning when neither exists
- * so an incompatible host degrades the settings UI instead of failing boot.
- */
-function installImageSettings(ctx: Context, config: Config, hooks: SettingsHooks): void {
-  const namespace = dshSettings as typeof dshSettings & LegacySettingsApi
-  // Runtime probe, not compile-time presence: the host decides which API
-  // generation is live, whichever dsh-settings this bundle was typed against.
-  const modern = namespace.SettingsProvider?.prototype?.installSection
-  if (typeof modern === 'function') {
-    // The injected context is typed by the current dsh-settings, whose module
-    // extension already declares the `settings` service on Context.
-    ctx.inject(['settings'], (settingsCtx: Context) => {
-      settingsCtx.settings.installSection(ctx, IMAGE_GENERATION_NAMESPACE, Config, config, hooks)
-    })
-    return
-  }
-  const legacyInstall = namespace.installSettingsSection
-  const legacyNamespace = namespace.settingsNamespace
-  if (typeof legacyInstall === 'function' && typeof legacyNamespace === 'function') {
-    legacyInstall(ctx, legacyNamespace(IMAGE_GENERATION_NAMESPACE), Config, config, hooks)
-    return
-  }
-  ctx.logger.warn('dsh-image-gen: this DSH exposes neither settings API generation; settings UI stays on the composition entry')
 }

@@ -19,6 +19,7 @@ import {
   DEFAULT_BASE_URLS,
   DEFAULT_COMFYUI_TIMEOUT_MS,
   DEFAULT_MODELS,
+  IMAGE_GENERATION_ENTRY_ID,
   IMAGE_GENERATION_NAMESPACE,
   IMAGE_PROVIDERS,
   MAX_COMFYUI_WORKFLOW_BYTES,
@@ -685,11 +686,24 @@ const STYLE = `
 
 
 /** Required browser services. */
-export const inject = ['slots', 'connection', 'remote', 'settingsScope', 'locale']
+export const inject = ['slots', 'connection', 'remote', 'configForms', 'locale']
 
 /** Mount the settings card, generated-image card, and native conversation gallery view. */
 export function apply(ctx: Context): void {
-  const scope = ctx.settingsScope.bind<ImageSettings>({ namespace: IMAGE_GENERATION_NAMESPACE as never })
+  // DSH 0.1.6+ exposes settings forms through the shared `configForms`
+  // service, keyed by the profile entry id from cordis.patch.yml.
+  // `ConfigForm.set` resolves `false` when the Host refuses the write
+  // (validation failure, revision conflict after recovery) instead of
+  // rejecting, so surface refusals as rejections — every call site already
+  // reports failures through `.catch`.
+  const form = ctx.configForms.get<ImageSettings>(IMAGE_GENERATION_ENTRY_ID)
+  const scope: SettingsScope<ImageSettings> = {
+    getSnapshot: () => form.getSnapshot(),
+    subscribe: listener => form.subscribe(listener),
+    set: async (field, value) => {
+      if (!await form.set(field, value)) throw new Error(`Settings write refused: ${field}`)
+    },
+  }
   const locale = ctx.get('locale') as LocaleService | undefined
 
   ctx.effect(() => {

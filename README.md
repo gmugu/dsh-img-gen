@@ -25,6 +25,9 @@
 >
 > 因此本 README 只描述保留下来的部分；**画布/工作台/灵感库/多模型对比的完整文档与截图请看
 > [上游 README](https://github.com/shanliuling/dsh-image-gen#readme)**。
+>
+> **最低版本**：自 0.6.11 起，本 fork 需要 **DSH ≥ 0.1.6**（volatile 配置 + `configForms` 客户端
+> 服务 + 顶层 `role: 'tool'` 消息）。旧版 DSH 上客户端插件不会加载，参考图识别也不完整。
 
 ## 安装
 

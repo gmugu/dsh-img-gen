@@ -73,7 +73,12 @@ export interface Config {
     /** Workspace subfolder for generated images; empty means the workspace root. */
     workspaceFolder?: string;
 }
-/** Cordis configuration schema. */
+/**
+ * Cordis configuration schema. The root is volatile: DSH 0.1.6+ derives the
+ * settings form from it and applies edits live (the plugin receives one
+ * reference cell whose `.get()` always yields the current values); the
+ * plain-object shape only appears in unit tests that call `apply` directly.
+ */
 export declare const Config: z<Config>;
 /** Resolve exactly one provider profile for a tool call. */
 export declare function resolveProvider(config: Config): {

@@ -34,19 +34,17 @@ function sourcedMessage(content: unknown[], source: { kind: 'user' } | { kind: '
 }
 
 describe('reference image compatibility boundary', () => {
-  it('finds the newest image recursively inside tool-result content', () => {
+  it('finds the newest image inside tool-result content', () => {
     const older = imageRef('older')
     const newest = imageRef('newest')
+    // DSH 0.1.6+: tool results are top-level `role: 'tool'` messages with
+    // root-level content blocks.
     const history = [
       ...messages([{ type: 'image', attachment: older }]),
-      ...messages([{
-        type: 'tool-result',
-        toolCallId: 'call-1',
-        content: [
-          { type: 'text', text: 'edited image' },
-          { type: 'image', attachment: newest },
-        ],
-      }]),
+      sourcedMessage([
+        { type: 'text', text: 'edited image' },
+        { type: 'image', attachment: newest },
+      ], { kind: 'tool', callId: 'call-1' }),
     ]
 
     expect(findReferenceImage(history)).toBe(newest)
@@ -69,10 +67,13 @@ describe('reference image compatibility boundary', () => {
     const second = imageRef('second')
     const history = [
       ...messages([{ type: 'image', attachment: older }]),
+      // DSH 0.1.6+: a tool result is its own `role: 'tool'` message whose
+      // content blocks sit at the message root; both images below could just
+      // as well arrive in one tool-result message.
       ...messages([
         { type: 'image', attachment: first },
         { type: 'text', text: 'combine these' },
-        { type: 'tool-result', toolCallId: 'call-2', content: [{ type: 'image', attachment: second }] },
+        { type: 'image', attachment: second },
       ]),
     ]
 
@@ -143,11 +144,7 @@ describe('reference image compatibility boundary', () => {
         { type: 'image', attachment: person },
         { type: 'text', text: 'replace the person with the cat' },
       ], { kind: 'user' }),
-      sourcedMessage([{
-        type: 'tool-result',
-        toolCallId: 'read-call',
-        content: [{ type: 'image', attachment: unrelatedWorkspaceImage }],
-      }], { kind: 'tool', callId: 'read-call' }),
+      sourcedMessage([{ type: 'image', attachment: unrelatedWorkspaceImage }], { kind: 'tool', callId: 'read-call' }),
     ]
 
     expect(findReferenceImages(history)).toEqual([cat, person])
@@ -156,10 +153,7 @@ describe('reference image compatibility boundary', () => {
   it('falls back to the newest generated or tool-read image when the current human message has no image', () => {
     const generated = imageRef('generated')
     const history = [
-      sourcedMessage([{
-        type: 'tool-result', toolCallId: 'generate-call',
-        content: [{ type: 'image', attachment: generated }],
-      }], { kind: 'tool', callId: 'generate-call' }),
+      sourcedMessage([{ type: 'image', attachment: generated }], { kind: 'tool', callId: 'generate-call' }),
       sourcedMessage([{ type: 'text', text: 'add sunglasses to the last image' }], { kind: 'user' }),
     ]
 

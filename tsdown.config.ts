@@ -8,6 +8,19 @@ const CLIENT_EXTERNALS = [
   '@deepseek-ai/dsh-client-ui-slots',
 ]
 
+/** Host packages consumed at runtime; they must stay external so the plugin
+ * shares the host's single copies (Service/class identity, schema instanceof,
+ * tool-definition shape) instead of bundling its own. */
+const HOST_EXTERNALS = [
+  '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-attachment',
+  '@deepseek-ai/dsh-credentials',
+  '@deepseek-ai/dsh-llm',
+  '@deepseek-ai/dsh-settings',
+  '@deepseek-ai/dsh-tools',
+  '@deepseek-ai/schemastery',
+]
+
 const host: UserConfig = {
   name: 'dsh-image-gen',
   entry: ['lib/types/index.js'],
@@ -18,6 +31,7 @@ const host: UserConfig = {
   fixedExtension: false,
   dts: false,
   clean: false,
+  external: HOST_EXTERNALS,
 }
 
 const client: UserConfig = {

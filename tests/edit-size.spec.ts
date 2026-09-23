@@ -61,7 +61,7 @@ function harness(config: Config, saved: { width: number; height: number } = { wi
     webServer: { register: vi.fn(() => () => {}) },
     credentials: { resolve: vi.fn(async () => ({ value: 'test-key' })) },
     inject: (services: readonly string[], callback: (owner: unknown) => void) => {
-      if (services.includes('settings')) callback({ settings: { installSection: vi.fn() } })
+      if (services.includes('settings')) callback({ settings: { configure: vi.fn(() => () => {}) }, effect: (setup: () => unknown) => setup() })
     },
     attachments: {
       imageLimits: {

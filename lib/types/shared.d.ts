@@ -112,6 +112,11 @@ export interface CanvasStatePush {
 }
 /** Namespace persisted through DSH Settings. */
 export declare const IMAGE_GENERATION_NAMESPACE = "image-generation";
+/**
+ * Profile entry id (the `id` in cordis.patch.yml's insert). DSH 0.1.6+ keys
+ * the client settings form (`ctx.configForms.get`) by this entry id.
+ */
+export declare const IMAGE_GENERATION_ENTRY_ID = "image-gen";
 /** Supported providers. */
 export declare const IMAGE_PROVIDERS: readonly ["google", "openai", "openai-compat", "seedream", "dashscope", "qwen-token-plan", "xai", "zhipu", "comfyui", "chatgpt-sub", "grok-sub", "google-sub"];
 export type ImageProvider = typeof IMAGE_PROVIDERS[number];

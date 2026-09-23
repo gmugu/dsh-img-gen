@@ -27,6 +27,10 @@
 >
 > For the canvas / Studio / inspiration / multi-model-compare documentation and screenshots, see the
 > [upstream README](https://github.com/shanliuling/dsh-image-gen#readme).
+>
+> **Minimum version**: since 0.6.11 this fork requires **DSH ≥ 0.1.6** (volatile config, the
+> `configForms` client service, and top-level `role: 'tool'` messages). On older DSH hosts the
+> client plugin does not load and reference-image lookup is incomplete.
 
 ## Install
 

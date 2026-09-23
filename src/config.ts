@@ -154,7 +154,12 @@ export interface Config {
   workspaceFolder?: string
 }
 
-/** Cordis configuration schema. */
+/**
+ * Cordis configuration schema. The root is volatile: DSH 0.1.6+ derives the
+ * settings form from it and applies edits live (the plugin receives one
+ * reference cell whose `.get()` always yields the current values); the
+ * plain-object shape only appears in unit tests that call `apply` directly.
+ */
 export const Config: z<Config> = z.object({
   provider: z.union(IMAGE_PROVIDERS).default('google'),
   googleModel: z.string().default(DEFAULT_GOOGLE_MODEL),
@@ -186,7 +191,7 @@ export const Config: z<Config> = z.object({
   comfyuiTimeoutMs: z.number().min(1_000).max(3_600_000).default(DEFAULT_COMFYUI_TIMEOUT_MS),
   saveToWorkspace: z.boolean().default(true),
   workspaceFolder: z.string().default(DEFAULT_WORKSPACE_FOLDER),
-})
+}).volatile() as unknown as z<Config>
 
 /** Resolve exactly one provider profile for a tool call. */
 export function resolveProvider(config: Config):
